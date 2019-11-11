@@ -6072,6 +6072,8 @@ const char** FileStore::get_tracked_conf_keys() const
     "filestore_sloppy_crc",
     "filestore_sloppy_crc_block_size",
     "filestore_max_alloc_hint_size",
+    "filestore_op_thread_suicide_timeout",
+    "filestore_op_thread_timeout",
     NULL
   };
   return KEYS;
@@ -6139,6 +6141,12 @@ void FileStore::handle_conf_change(const ConfigProxy& conf,
     } else {
       dump_stop();
     }
+  }
+  if (changed.count("filestore_op_thread_timeout")){
+    op_wq.set_timeout(g_conf().get_val<int64_t>("filestore_op_thread_timeout"));
+  }
+  if (changed.count("filestore_op_thread_suicide_timeout")){
+    op_wq.set_suicide_timeout(g_conf().get_val<int64_t>("filestore_op_thread_suicide_timeout"));
   }
 }
 
