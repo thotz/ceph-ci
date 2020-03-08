@@ -13,8 +13,9 @@ import logging
 import threading
 import traceback
 import os
+import six
 
-from io import BytesIO, StringIO
+from io import BytesIO
 from teuthology import misc as teuthology
 from tasks.scrub import Scrubber
 from tasks.util.rados import cmd_erasure_code_profile
@@ -23,7 +24,7 @@ from teuthology.contextutil import safe_while
 from teuthology.orchestra.remote import Remote
 from teuthology.orchestra import run
 from teuthology.exceptions import CommandFailedError
-import six
+from six import StringIO
 
 try:
     from subprocess import DEVNULL # py3k
@@ -192,6 +193,22 @@ class Thrasher:
                 return False;
         return True;
 
+    def run_ceph_objectstore_tool(self, remote, osd, cmd):
+        if self.ceph_manager.cephadm:
+            return shell(
+                self.ceph_manager.ctx, self.ceph_manager.cluster, remote,
+                args=['ceph-objectstore-tool'] + cmd,
+                name=osd,
+                wait=True, check_status=False,
+                stdout=StringIO(),
+                stderr=StringIO())
+        else:
+            return remote.run(
+                args=['sudo', 'adjust-ulimits', 'ceph-objectstore-tool'] + cmd,
+                wait=True, check_status=False,
+                stdout=StringIO(),
+                stderr=StringIO())
+
     def kill_osd(self, osd=None, mark_down=False, mark_out=False):
         """
         :param osd: Osd to be killed.
@@ -258,14 +275,14 @@ class Thrasher:
                     if proc.exitstatus == 0:
                         break
                     elif (proc.exitstatus == 1 and
-                          six.ensure_str(proc.stderr.getvalue()) == "OSD has the store locked"):
+                          proc.stderr.getvalue() == "OSD has the store locked"):
                         continue
                     else:
                         raise Exception("ceph-objectstore-tool: "
                                         "exp list-pgs failure with status {ret}".
                                         format(ret=proc.exitstatus))
 
-            pgs = proc.stdout.getvalue().split('\n')[:-1]
+            pgs = six.ensure_str(proc.stdout.getvalue()).split('\n')[:-1]
             if len(pgs) == 0:
                 self.log("No PGs found for osd.{osd}".format(osd=exp_osd))
                 return
@@ -303,7 +320,7 @@ class Thrasher:
                     raise Exception("ceph-objectstore-tool: "
                                     "imp list-pgs failure with status {ret}".
                                     format(ret=proc.exitstatus))
-                pgs = proc.stdout.getvalue().split('\n')[:-1]
+                pgs = six.ensure_str(proc.stdout.getvalue()).split('\n')[:-1]
                 if pg not in pgs:
                     self.log("Moving pg {pg} from osd.{fosd} to osd.{tosd}".
                              format(pg=pg, fosd=exp_osd, tosd=imp_osd))
@@ -325,7 +342,7 @@ class Thrasher:
                                   stderr=BytesIO())
             if proc.exitstatus == 1:
                 bogosity = "The OSD you are using is older than the exported PG"
-                if bogosity in six.ensure_str(proc.stderr.getvalue()):
+                if bogosity in proc.stderr.getvalue():
                     self.log("OSD older than exported PG"
                              "...ignored")
             elif proc.exitstatus == 10:
@@ -362,8 +379,8 @@ class Thrasher:
                            + " --op apply-layout-settings --pool " + pool).format(id=osd)
                     proc = imp_remote.run(args=cmd,
                                           wait=True, check_status=False,
-                                          stderr=BytesIO)
-                    if 'Couldn\'t find pool' in six.ensure_str(proc.stderr.getvalue()):
+                                          stderr=StringIO())
+                    if 'Couldn\'t find pool' in proc.stderr.getvalue():
                         continue
                     if proc.exitstatus:
                         raise Exception("ceph-objectstore-tool apply-layout-settings"
@@ -1090,8 +1107,8 @@ class ObjectStoreTool:
             proc.wait()
             if proc.exitstatus != 0:
                 self.manager.log("failed with " + str(proc.exitstatus))
-                error = proc.stdout.getvalue().decode()  + " " + \
-                        proc.stderr.getvalue().decode()
+                error = six.ensure_str(proc.stdout.getvalue())  + " " + \
+                        six.ensure_str(proc.stderr.getvalue())
                 raise Exception(error)
         finally:
             if self.do_revive:
