@@ -24,6 +24,7 @@
 #include "include/Context.h" /*engage1*/
 #include "include/lru.h" /*engage1*/
 #include "rgw_threadpool.h"
+//#include "services/svc_sys_obj_cache.h"
 
 enum {
   UPDATE_OBJ,
@@ -133,6 +134,7 @@ public:
     free_data_cache_size = cct->_conf->rgw_datacache_size;
     head = NULL;
     tail = NULL;
+    std::cout << "AMAT: In Cache INIT" << "\n";
   }
 
   void lru_insert_head(struct ChunkDataInfo *o) {
@@ -360,9 +362,14 @@ public:
 };
 
 // FIXME: #CACHEREBASE // : public RGWSI_SysObj_Cache
-/*
+
+
+class RGWObjState;
+struct get_obj_data;
+
+
 template <class T>
-class RGWDataCache  : public RGWCache<T>
+class RGWDataCache : public T
 {
 
   DataCache   data_cache;
@@ -370,36 +377,34 @@ class RGWDataCache  : public RGWCache<T>
 public:
   RGWDataCache() {}
 
-  int init_rados() override {
-    int ret;
-    data_cache.init(T::cct);
-    ret = RGWCache<T>::init_rados();
-    if (ret < 0)
-      return ret;
-
-    return 0;
-  }
-
   int flush_read_list(struct get_obj_data *d);
-  int get_obj_iterate_cb(RGWObjectCtx *ctx, RGWObjState *astate,
+  
+  int get_obj_iterate_cb(const rgw_raw_obj& read_obj, off_t obj_ofs,
+                         off_t read_ofs, off_t len, bool is_head_obj,
+                         RGWObjState *astate, void *arg);
+  /* 
+  (RGWObjectCtx *ctx, RGWObjState *astate,
       const RGWBucketInfo& bucket_info, const rgw_obj& obj,
       const rgw_raw_obj& read_obj,
       off_t obj_ofs, off_t read_ofs, off_t len,
       bool is_head_obj, void *arg);
+  */
 
 };
 
-struct get_obj_data;
 
 template<typename T>
 int RGWDataCache<T>::flush_read_list(struct get_obj_data *d) {
-  d->data_lock.Lock();
+
+  mydout(20) << "AMAT: In Flush read list Cache file" << dendl;
+  d->data_lock.lock();
   list<bufferlist> l;
   l.swap(d->read_list);
   d->get();
+  mydout(20) << "AMAT: After d->get()" << dendl;
   d->read_list.clear();
 
-  d->data_lock.Unlock();
+  d->data_lock.unlock();
 
   int r = 0;
 
@@ -417,35 +422,33 @@ int RGWDataCache<T>::flush_read_list(struct get_obj_data *d) {
     }
   }
 
-  d->data_lock.Lock();
+  d->data_lock.lock();
   d->put();
   if (r < 0) {
     d->set_cancelled(r);
   }
-  d->data_lock.Unlock();
+  d->data_lock.unlock();
   return r;
 
 }
 
-template<typename T>
-int RGWDataCache<T>::get_obj_iterate_cb(RGWObjectCtx *ctx, RGWObjState *astate,
-    const RGWBucketInfo& bucket_info, const rgw_obj& obj,
-    const rgw_raw_obj& read_obj,
-    off_t obj_ofs, off_t read_ofs, off_t len,
-    bool is_head_obj, void *arg) {
+template<class T>
+int RGWDataCache<T>::get_obj_iterate_cb(const rgw_raw_obj& read_obj, off_t obj_ofs,
+                                 off_t read_ofs, off_t len, bool is_head_obj,
+                                 RGWObjState *astate, void *arg) {
 
-  RGWObjectCtx *rctx = static_cast<RGWObjectCtx *>(ctx);
+  //RGWObjectCtx *rctx = static_cast<RGWObjectCtx *>(ctx);
   librados::ObjectReadOperation op;
   struct get_obj_data *d = (struct get_obj_data *)arg;
   string oid, key;
   bufferlist *pbl;
   librados::AioCompletion *c;
 
-  int r;
+  int r = 0;
 
   if (is_head_obj) {
     // only when reading from the head object do we need to do the atomic test
-    r = T::append_atomic_test(rctx, bucket_info, obj, op, &astate);
+    r = T::append_atomic_test(astate, op);
     if (r < 0)
       return r;
 
@@ -457,9 +460,9 @@ int RGWDataCache<T>::get_obj_iterate_cb(RGWObjectCtx *ctx, RGWObjState *astate,
       if (r < 0)
         return r;
 
-      d->lock.Lock();
+      d->lock.lock();
       d->total_read += chunk_len;
-      d->lock.Unlock();
+      d->lock.unlock();
 
       len -= chunk_len;
       read_ofs += chunk_len;
@@ -469,7 +472,7 @@ int RGWDataCache<T>::get_obj_iterate_cb(RGWObjectCtx *ctx, RGWObjState *astate,
     }
   }
 
-  d->throttle.get(len);
+  d->throttle->get(len);
   if (d->is_cancelled()) {
     return d->get_err_code();
   }
@@ -488,7 +491,7 @@ int RGWDataCache<T>::get_obj_iterate_cb(RGWObjectCtx *ctx, RGWObjState *astate,
   if (data_cache.get(read_obj.oid)) {
     librados::L1CacheRequest *cc;
     d->add_l1_request(&cc, pbl, read_obj.oid, len, obj_ofs, read_ofs, key, c);
-    r = io_ctx.cache_aio_notifier(read_obj.oid, cc);
+    r = io_ctx.cache_aio_notifier(read_obj.oid, dynamic_cast<librados::CacheRequest*>(cc));
     r = d->submit_l1_aio_read(cc);
     if (r != 0 ){
       mydout(0) << "Error cache_aio_read failed err=" << r << dendl;
@@ -502,13 +505,13 @@ int RGWDataCache<T>::get_obj_iterate_cb(RGWObjectCtx *ctx, RGWObjState *astate,
       mydout(0) << "rados->aio_operate r=" << r << dendl;
       goto done_err;
     }
-  } else {
+  }  else {
     librados::L2CacheRequest *cc;
     d->add_l2_request(&cc, pbl, read_obj.oid, obj_ofs, read_ofs, len, key, c);
 //    r = d->add_cache_notifier(oid, c);
-    r = io_ctx.cache_aio_notifier(read_obj.oid, cc); 
+    r = io_ctx.cache_aio_notifier(read_obj.oid, dynamic_cast<librados::CacheRequest*>(cc)); 
     data_cache.push_l2_request(cc);
-  }
+  } 
 
   // Flush data to client if there is any
   r = flush_read_list(d);
@@ -524,7 +527,7 @@ done_err:
 
   return r;
 }
-*/
+
 class L2CacheThreadPool {
 public:
   L2CacheThreadPool(int n) {

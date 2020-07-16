@@ -1099,6 +1099,11 @@ int RGWRados::init_rados()
   }
 
   cr_registry = crs.release();
+  if(use_datacache) {
+    datacache = new DataCache();
+    datacache->init(cct);
+  }
+
   return ret;
 }
 
@@ -6189,18 +6194,76 @@ int RGWRados::Object::Read::read(int64_t ofs, int64_t end, bufferlist& bl, optio
   return bl.length();
 }
 
-struct get_obj_data {
+
+/*
+
+struct get_obj_data : public RefCountedObject{
+  CephContext* cct; //amat
   RGWRados* store;
   RGWGetDataCB* client_cb;
+  RGWObjectCtx* ctx; //amat
+  librados::IoCtx io_ctx;
   rgw::Aio* aio;
   uint64_t offset; // next offset to write to client
+  uint64_t total_read; //amat
+  int sequence;
+
   rgw::AioResultList completed; // completed read results, sorted by offset
   optional_yield yield;
 
-  get_obj_data(RGWRados* store, RGWGetDataCB* cb, rgw::Aio* aio,
-               uint64_t offset, optional_yield yield)
-    : store(store), client_cb(cb), aio(aio), offset(offset), yield(yield) {}
+  std::mutex lock;
+  std::mutex data_lock;
+  std::mutex cache_lock;
+  std::mutex l2_lock;
+  Throttle* throttle;
+  std::atomic<bool> cancelled = { false };
+  std::atomic<int64_t> err_code = { 0 };
+  std::list<get_obj_aio_data> aio_data;
+  std::list<bufferlist> read_list;
+  std::list<string> pending_oid_list;
+  std::map<off_t, get_obj_io> io_map;
+  std::map<off_t, librados::CacheRequest*> cache_aio_map;
+  std::map<off_t, librados::AioCompletion *> completion_map;
 
+  char *tmp_data;
+  
+
+  get_obj_data(CephContext *_cct);
+
+  get_obj_data(RGWRados* store, RGWGetDataCB* cb, rgw::Aio* aio,
+               uint64_t offset, optional_yield yield, Throttle *throttle)
+               : store(store), client_cb(cb), aio(aio), offset(offset), yield(yield),
+               throttle(throttle) {}
+  
+
+  ~get_obj_data();
+
+  void add_pending_oid(std::string oid); 
+  void set_cancelled(int r);
+  bool is_cancelled();
+  int get_err_code();
+  int wait_next_io(bool *done);
+  void add_io(off_t ofs, off_t len, bufferlist **pbl, librados::AioCompletion **pc);
+  void cancel_io(off_t ofs);
+  void cancel_all_io();
+
+  int get_complete_ios(off_t ofs, list<bufferlist>& bl_list);
+
+  string get_pending_oid();
+  bool deterministic_hash_is_local(string oid);
+  string deterministic_hash(string oid);
+  int add_l1_request(struct librados::L1CacheRequest **cc, bufferlist *pbl, string oid,
+      size_t len, off_t ofs, off_t read_ofs, string key, librados::AioCompletion *lc);
+  int add_l2_request(struct librados::L2CacheRequest **cc, bufferlist *pbl, string oid,
+      off_t obj_ofs, off_t read_ofs, size_t len, string key, librados::AioCompletion *lc);
+  int add_cache_notifier(std::string oid, librados::AioCompletion *lc);
+  void cache_aio_completion_cb(librados::CacheRequest *c);
+  void cache_unmap_io(off_t ofs);
+
+  int submit_l1_aio_read(librados::L1CacheRequest *cc);
+  int submit_l1_io_read(bufferlist *bl, int len, string oid);
+
+  
   int flush(rgw::AioResultList&& results) {
     int r = rgw::check_for_errors(results);
     if (r < 0) {
@@ -6243,19 +6306,26 @@ struct get_obj_data {
   }
 };
 
-static void _get_obj_aio_completion_cb(completion_t cb, void *arg);
+*/
+
+
 // FIXME: #CACHEREBASE
-/*
+static void _get_obj_aio_completion_cb(completion_t cb, void *arg);
+
 get_obj_data::get_obj_data(CephContext *_cct)
   : cct(_cct),
-  rados(NULL), ctx(NULL),
-  total_read(0), lock("get_obj_data"), data_lock("get_obj_data::data_lock"),
+  store(NULL), ctx(NULL),
+  total_read(0), lock(), data_lock(),
   client_cb(NULL),
-  cache_lock("get_obj_data::cache_lock"), 
-  l2_lock("get_obj_data::l2_lock"),
-  throttle(cct, "get_obj_data", cct->_conf->rgw_get_obj_window_size, false) {}
+  cache_lock(), 
+  l2_lock(),
+  yield(yield),
+  throttle(throttle) {};
   
-get_obj_data::~get_obj_data() { } 
+get_obj_data::~get_obj_data() {
+  ceph_assert(this);
+}
+
 
 void get_obj_data::set_cancelled(int r) {
   cancelled = true;
@@ -6299,7 +6369,7 @@ int get_obj_data::wait_next_io(bool *done) {
 }
 
 void get_obj_data::add_io(off_t ofs, off_t len, bufferlist **pbl, AioCompletion **pc) {
-  std::lock_guard l{lock};
+  std::lock_guard<std::mutex> l(lock);
 
   const auto& io_iter = io_map.insert(
       map<off_t, get_obj_io>::value_type(ofs, get_obj_io()));
@@ -6348,7 +6418,7 @@ void get_obj_data::cancel_io(off_t ofs) {
 
 void get_obj_data::cancel_all_io() {
   ldout(cct, 20) << "get_obj_data::cancel_all_io()" << dendl;
-  std::lock_guard l{lock};
+  std::lock_guard<std::mutex> l(lock);
   for (map<off_t, librados::AioCompletion *>::iterator iter = completion_map.begin();
       iter != completion_map.end(); ++iter) {
     librados::AioCompletion  *c = iter->second;
@@ -6357,7 +6427,7 @@ void get_obj_data::cancel_all_io() {
 }
 
 int get_obj_data::get_complete_ios(off_t ofs, list<bufferlist>& bl_list) {
-  std::lock_guard l{lock};
+  std::lock_guard<std::mutex> l(lock);
 
   map<off_t, get_obj_io>::iterator liter = io_map.begin();
 
@@ -6403,10 +6473,10 @@ int get_obj_data::get_complete_ios(off_t ofs, list<bufferlist>& bl_list) {
 
 static void _cache_aio_completion_cb(sigval_t sigval);
 
-vector<string> split(const string &s, const char * delim) {
+std::vector<string> split(const string &s, const char * delim) {
   stringstream ss(s);
   string item;
-  vector<string> tokens;
+  std::vector<string> tokens;
   while (getline(ss, item, (*delim))) {
     tokens.push_back(item);
   }
@@ -6425,7 +6495,7 @@ string get_obj_data::deterministic_hash(string oid) {
   int mod = tokens.size();
 
   std::string::size_type sz;   // alias of size_t
-  vector<string> sv = split(oid, "_");
+  std::vector<string> sv = split(oid, "_");
   int hash = std::stoi(sv[sv.size()-1], &sz);
   return tokens[hash%mod];
 }
@@ -6542,6 +6612,12 @@ int get_obj_data::submit_l1_aio_read(librados::L1CacheRequest *cc) {
   return r;
 }
 
+void _cache_aio_completion_cb(sigval_t sigval)
+{ 
+  librados::CacheRequest *c = static_cast<librados::CacheRequest *>(sigval.sival_ptr);
+  c->op_data->cache_aio_completion_cb(c);
+}
+
 void get_obj_data::cache_aio_completion_cb(librados::CacheRequest *c){
 
   int status = c->status();
@@ -6575,17 +6651,99 @@ int get_obj_data::add_cache_notifier(std::string oid, librados::AioCompletion *l
   //librados::IoCtxImpl::C_aio_Complete *m_safe = new librados::IoCtxImpl::C_aio_Complete(lc->pc);
   return 0;
 }
-*/
+
+static void _get_obj_aio_completion_cb(completion_t cb, void *arg)
+{
+  struct get_obj_aio_data *aio_data = (struct get_obj_aio_data *)arg;
+  struct get_obj_data *d = aio_data->op_data;
+
+  d->store->get_obj_aio_completion_cb(cb, arg);
+}
 
 static int _get_obj_iterate_cb(const rgw_raw_obj& read_obj, off_t obj_ofs,
                                off_t read_ofs, off_t len, bool is_head_obj,
                                RGWObjState *astate, void *arg)
 {
   struct get_obj_data *d = (struct get_obj_data *)arg;
-
   return d->store->get_obj_iterate_cb(read_obj, obj_ofs, read_ofs, len,
                                       is_head_obj, astate, arg);
 }
+
+void RGWRados::get_obj_aio_completion_cb(completion_t c, void *arg)
+{
+  struct get_obj_aio_data *aio_data = (struct get_obj_aio_data *)arg;
+  struct get_obj_data *d = aio_data->op_data;
+  off_t ofs = aio_data->ofs;
+  off_t len = aio_data->len;
+
+  list<bufferlist> bl_list;
+  list<bufferlist>::iterator iter;
+  int r;
+
+  ldout(cct, 20) << "get_obj_aio_completion_cb: io completion ofs=" << ofs << " len=" << len << dendl;
+  d->throttle->put(len);
+
+  r = rados_aio_get_return_value(c);
+  if (r < 0) {
+    ldout(cct, 0) << "ERROR: got unexpected error when trying to read object: " << r << dendl;
+    d->set_cancelled(r);
+    goto done;
+  }
+
+  if (d->is_cancelled()) {
+    goto done;
+  }
+
+  d->data_lock.lock();
+
+  r = d->get_complete_ios(ofs, bl_list);
+  if (r < 0) {
+    goto done_unlock;
+  }
+
+  d->read_list.splice(d->read_list.end(), bl_list);
+
+done_unlock:
+  d->data_lock.unlock();
+done:
+  d->put();
+  return;
+}
+
+int RGWRados::flush_read_list(struct get_obj_data *d)
+{
+
+  dout(20) << "AMAT Flush Read list" << dendl;
+  d->data_lock.lock();
+  list<bufferlist> l;
+  l.swap(d->read_list);
+  d->get();
+  d->read_list.clear();
+
+  d->data_lock.unlock();
+
+  int r = 0;
+
+  list<bufferlist>::iterator iter;
+  for (iter = l.begin(); iter != l.end(); ++iter) {
+    bufferlist& bl = *iter;
+    r = d->client_cb->handle_data(bl, 0, bl.length());
+    if (r < 0) {
+      dout(0) << "ERROR: flush_read_list(): d->client_cb->handle_data() returned " << r << dendl;
+      break;
+    }
+  }
+
+  d->data_lock.lock();
+  d->put();
+  if (r < 0) {
+    d->set_cancelled(r);
+  }
+  d->data_lock.unlock();
+  return r;
+}
+
+
 
 int RGWRados::get_obj_iterate_cb(const rgw_raw_obj& read_obj, off_t obj_ofs,
                                  off_t read_ofs, off_t len, bool is_head_obj,
@@ -6594,6 +6752,8 @@ int RGWRados::get_obj_iterate_cb(const rgw_raw_obj& read_obj, off_t obj_ofs,
   ObjectReadOperation op;
   struct get_obj_data *d = (struct get_obj_data *)arg;
   string oid, key;
+  bufferlist *pbl;
+  AioCompletion *c;
 
   if (is_head_obj) {
     /* only when reading from the head object do we need to do the atomic test */
@@ -6609,6 +6769,10 @@ int RGWRados::get_obj_iterate_cb(const rgw_raw_obj& read_obj, off_t obj_ofs,
       if (r < 0)
         return r;
 
+      d->lock.lock();
+      d->total_read += chunk_len;
+      d->lock.unlock();
+
       len -= chunk_len;
       d->offset += chunk_len;
       read_ofs += chunk_len;
@@ -6617,6 +6781,13 @@ int RGWRados::get_obj_iterate_cb(const rgw_raw_obj& read_obj, off_t obj_ofs,
 	  return 0;
     }
   }
+
+  d->throttle->get(len);
+  if(d->is_cancelled()) {
+    return d->get_err_code();
+  }
+
+  d->add_io(obj_ofs, len, &pbl, &c);
 
   auto obj = d->store->svc.rados->obj(read_obj);
   int r = obj.open();
@@ -6634,6 +6805,27 @@ int RGWRados::get_obj_iterate_cb(const rgw_raw_obj& read_obj, off_t obj_ofs,
   auto completed = d->aio->get(obj, rgw::Aio::librados_op(std::move(op), d->yield), cost, id);
 
   return d->flush(std::move(completed));
+
+  librados::IoCtx io_ctx(d->io_ctx);
+  io_ctx.locator_set_key(read_obj.loc);
+
+  r = io_ctx.aio_operate(read_obj.oid, c, &op, NULL);
+  if (r < 0) {
+    ldout(cct, 0) << "rados->aio_operate r=" << r << dendl;
+    goto done_err;
+  }
+
+  r = flush_read_list(d);
+  if (r < 0) 
+      return r;
+  return 0;
+
+  done_err:
+    ldout(cct, 20) << "cancelling io r=" << r << " obj_ofs=" << obj_ofs << dendl;
+    d->set_cancelled(r);
+    d->cancel_io(obj_ofs);
+    return r;
+
 }
 
 int RGWRados::Object::Read::iterate(int64_t ofs, int64_t end, RGWGetDataCB *cb,
@@ -6644,20 +6836,74 @@ int RGWRados::Object::Read::iterate(int64_t ofs, int64_t end, RGWGetDataCB *cb,
   RGWObjectCtx& obj_ctx = source->get_ctx();
   const uint64_t chunk_size = cct->_conf->rgw_get_obj_max_req_size;
   const uint64_t window_size = cct->_conf->rgw_get_obj_window_size;
-
   auto aio = rgw::make_throttle(window_size, y);
-  get_obj_data data(store, cb, &*aio, ofs, y);
+  bool done = false;
+  ldout(cct, 20) << "AMAT: Window Size" << window_size << dendl;
+  Throttle throttle(cct, "get_obj_data", window_size, false);
+  ldout(cct, 20) << "AMAT: After Throttle" << dendl;
+  struct get_obj_data *data = new get_obj_data(cct);
+  data->store = store;
+  data->client_cb = cb;
+  data->aio = &*aio;
+  data->offset = ofs;
+  data->yield = y;
+  data->throttle = &throttle;
 
+
+  // get_obj_data data(store, cb, &*aio, ofs, y, &throttle);
+
+
+  ldout(cct, 20) << "AMAT: Before iterate_obj" << dendl;
   int r = store->iterate_obj(obj_ctx, source->get_bucket_info(), state.obj,
-                             ofs, end, chunk_size, _get_obj_iterate_cb, &data, y);
+                             ofs, end, chunk_size, _get_obj_iterate_cb, (void *)data, y);
+
+  ldout(cct, 20) << "AMAT: After iterate_obj: " << r << dendl;
+
   if (r < 0) {
     ldout(cct, 0) << "iterate_obj() failed with " << r << dendl;
-    data.cancel(); // drain completions without writing back to client
+    data->cancel(); // drain completions without writing back to client
+    data->cancel_all_io();
+    ldout(cct, 20) << "AMAT: Before goto done" << dendl;
+    /*
+    ldout(cct, 20) << "AMAT: In done section" << r << dendl;
+    data.put();
     return r;
+    */
+    goto done;
   }
 
-  return data.drain();
+
+  while(!done) {  
+    ldout(cct, 20) << "AMAT: in while loop" << dendl;
+  
+    r = data->wait_next_io(&done);
+    if (r < 0) {
+      dout(10) << __func__ << " r=" << r << ", cancelling all io" << dendl;
+      data->cancel_all_io();
+      break;
+    }
+    
+    ldout(cct, 20) << "AMAT: before flush read list" << dendl;
+
+    r = store->flush_read_list(data);
+
+    ldout(cct, 20) << "AMAT: after flush read list " << r << dendl;
+    if (r < 0) {
+      dout(10) << __func__ << " r=" << r << ", cancelling all io" << dendl;
+      data->cancel_all_io();
+      break;
+    }
+  }
+
+
+done:
+  ldout(cct, 20) << "AMAT: In done section " << r << dendl;
+  data->put();
+  return r;
+
+return data->drain();
 }
+
 
 int RGWRados::iterate_obj(RGWObjectCtx& obj_ctx,
                           const RGWBucketInfo& bucket_info, const rgw_obj& obj,
@@ -6685,9 +6931,12 @@ int RGWRados::iterate_obj(RGWObjectCtx& obj_ctx,
 
   if (astate->manifest) {
     /* now get the relevant object stripe */
-    RGWObjManifest::obj_iterator iter = astate->manifest->obj_find(ofs);
 
-    RGWObjManifest::obj_iterator obj_end = astate->manifest->obj_end();
+    RGWObjManifest& manifest = *astate->manifest;
+
+    RGWObjManifest::obj_iterator iter = manifest.obj_find(ofs);
+
+    RGWObjManifest::obj_iterator obj_end = manifest.obj_end();
 
     for (; iter != obj_end && ofs <= end; ++iter) {
       off_t stripe_ofs = iter.get_stripe_ofs();
@@ -6702,13 +6951,14 @@ int RGWRados::iterate_obj(RGWObjectCtx& obj_ctx,
           read_len = max_chunk_size;
         }
 
+        //amat
+        // Check if we have a head object or tail object 
         reading_from_head = (read_obj == head_obj);
         r = cb(read_obj, ofs, read_ofs, read_len, reading_from_head, astate, arg);
-	if (r < 0) {
-	  return r;
+        if (r < 0) {
+          return r;
         }
-
-	len -= read_len;
+        len -= read_len;
         ofs += read_len;
       }
     }
@@ -9301,6 +9551,7 @@ uint64_t RGWRados::next_bucket_id()
 
 // FIXME: #CACHEREBASE
 /*
+
 RGWRados *RGWStoreManager::init_storage_provider(CephContext *cct, bool use_gc_thread, bool use_lc_thread,
 						 bool quota_threads, bool run_sync_thread, bool run_reshard_thread, bool use_metacache, bool use_datacache)
 {
@@ -9347,6 +9598,7 @@ void RGWStoreManager::close_storage(RGWRados *store)
   delete store;
 }
 */
+
 librados::Rados* RGWRados::get_rados_handle()
 {
   return &rados;

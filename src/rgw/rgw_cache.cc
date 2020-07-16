@@ -498,7 +498,7 @@ void DataCache::put(bufferlist& bl, unsigned int len, std::string oid){
   map<string, ChunkDataInfo *>::iterator iter = cache_map.find(oid);
   if (iter != cache_map.end()) {
     cache_lock.unlock();
-    ldout(cct, 10) << "Engage1: Warning: data already cached, no rewirte" << dendl;
+    ldout(cct, 10) << "Engage1: Warning: data already cached, no rewrite" << dendl;
     return;
   }
   std::list<std::string>::iterator it = std::find(outstanding_write_list.begin(), outstanding_write_list.end(),oid);
@@ -541,7 +541,8 @@ void DataCache::put(bufferlist& bl, unsigned int len, std::string oid){
 bool DataCache::get(string oid) { 
 
   bool exist = false;
-  string location = cct->_conf->rgw_datacache_persistent_path + oid; 
+  string location = cct->_conf->rgw_datacache_persistent_path + oid;
+  ldout(cct, 20) << "AMAT: File Location for Read: " << location << dendl;
   cache_lock.lock();
   map<string, ChunkDataInfo*>::iterator iter = cache_map.find(oid);
   if (!(iter == cache_map.end())){
@@ -549,13 +550,13 @@ bool DataCache::get(string oid) {
     struct ChunkDataInfo *chdo = iter->second;
     if(access(location.c_str(), F_OK ) != -1 ) { // file exists
       exist = true;
-      { /*LRU*/
-
-	/*get ChunkDataInfo*/
-	eviction_lock.lock();
-	lru_remove(chdo);
-	lru_insert_head(chdo);
-	eviction_lock.unlock();
+      {
+      /*LRU*/
+      /*get ChunkDataInfo*/
+      eviction_lock.lock();
+      lru_remove(chdo);
+      lru_insert_head(chdo);
+      eviction_lock.unlock();
       }
     } else {	
       cache_map.erase(oid);

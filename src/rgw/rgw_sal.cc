@@ -299,13 +299,22 @@ rgw::sal::RGWRadosStore *RGWStoreManager::init_storage_provider(CephContext *cct
 {
   // FIXME: #CACHEREBASE: continue - pass down "use_datacache"
 
-  RGWRados *rados = new RGWRados;
+  ldout(cct, 20) << "AMAT: Init Storage Provider " << dendl;
+  RGWRados *rados = NULL;
+  if (use_datacache) {
+    ldout(cct, 20) << "AMAT: use datacache has been set " << dendl; 
+    rados = new RGWDataCache<RGWRados>;
+    ldout(cct, 20) << "AMAT: Rados object " << rados << dendl;
+  } else {
+    rados = new RGWRados;
+  }
   rgw::sal::RGWRadosStore *store = new rgw::sal::RGWRadosStore();
 
   store->setRados(rados);
   rados->set_store(store);
 
   if ((*rados).set_use_cache(use_metacache)
+              .set_use_datacache(use_datacache)
               .set_run_gc_thread(use_gc_thread)
               .set_run_lc_thread(use_lc_thread)
               .set_run_quota_threads(quota_threads)

@@ -28,6 +28,8 @@
 #include "rgw_sync_module.h"
 #include "rgw_trim_bilog.h"
 #include "rgw_service.h"
+#include "rgw_cache.h"
+#include "rgw_aio.h"
 
 #include "services/svc_rados.h"
 #include "services/svc_bi_rados.h"
@@ -52,6 +54,7 @@ class RGWReshardWait;
 
 class RGWSysObjectCtx;
 struct get_obj_data;
+struct DataCache;
 
 /* flags for put_obj_meta() */
 #define PUT_OBJ_CREATE      0x01
@@ -176,6 +179,9 @@ struct RGWObjState {
   string write_tag;
   bool fake_tag{false};
   std::optional<RGWObjManifest> manifest;
+
+  
+  bool has_manifest;
   string shadow_obj;
   bool has_data{false};
   bufferlist data;
@@ -509,6 +515,7 @@ protected:
   RGWIndexCompletionManager *index_completion_manager{nullptr};
 
   bool use_cache{false};
+  bool use_datacache{false};
 public:
   RGWRados(): timer(NULL),
                gc(NULL), lc(NULL), obj_expirer(NULL), use_gc_thread(false), use_lc_thread(false), quota_threads(false),
@@ -525,6 +532,12 @@ public:
 
   RGWRados& set_use_cache(bool status) {
     use_cache = status;
+    return *this;
+  }
+
+  RGWRados& set_use_datacache(bool status) {
+    use_datacache = status;
+    std::cout << "AMAT: Setting Datacache bool: " << status << "\n";
     return *this;
   }
 
@@ -1084,6 +1097,8 @@ public:
     ATTRSMOD_MERGE   = 2
   };
 
+  DataCache *datacache;
+
   int rewrite_obj(RGWBucketInfo& dest_bucket_info, const rgw_obj& obj, const DoutPrefixProvider *dpp, optional_yield y);
 
   int stat_remote_obj(RGWObjectCtx& obj_ctx,
@@ -1266,7 +1281,7 @@ public:
 
   
   // FIXME: #CACHEREBASE
-  //virtual int flush_read_list(struct get_obj_data *d);
+  virtual int flush_read_list(struct get_obj_data *d);
   //virtual int get_obj_iterate_cb(const rgw_raw_obj& read_obj, off_t obj_ofs,
   int get_obj_iterate_cb(const rgw_raw_obj& read_obj, off_t obj_ofs,
                          off_t read_ofs, off_t len, bool is_head_obj,
@@ -1658,33 +1673,50 @@ struct librados::L2CacheRequest : public librados::CacheRequest {
 
 
 // FIXME: #CACHEREBASE
-/*
-struct get_obj_data : public RefCountedObject {
-  CephContext *cct;
-  RGWRados *rados;
-  RGWObjectCtx *ctx;
+
+
+struct get_obj_data : public RefCountedObject{
+  CephContext* cct; //amat
+  RGWRados* store;
+  RGWGetDataCB* client_cb;
+  RGWObjectCtx* ctx; //amat
   librados::IoCtx io_ctx;
-  map<off_t, get_obj_io> io_map;
-  map<off_t, librados::AioCompletion *> completion_map;
-  uint64_t total_read;
-  Mutex lock;
-  Mutex data_lock;
-  list<get_obj_aio_data> aio_data;
-  RGWGetDataCB *client_cb;
+  rgw::Aio* aio;
+  uint64_t offset; // next offset to write to client
+  uint64_t total_read; //amat
+  int sequence;
+
+  rgw::AioResultList completed; // completed read results, sorted by offset
+  optional_yield yield;
+
+  std::mutex lock;
+  std::mutex data_lock;
+  std::mutex cache_lock;
+  std::mutex l2_lock;
+  Throttle* throttle;
   std::atomic<bool> cancelled = { false };
   std::atomic<int64_t> err_code = { 0 };
-  Throttle throttle;
-  list<bufferlist> read_list;
-
-  int sequence;
-  Mutex cache_lock;
-  Mutex l2_lock;
+  std::list<get_obj_aio_data> aio_data;
+  std::list<bufferlist> read_list;
   std::list<string> pending_oid_list;
+  std::map<off_t, get_obj_io> io_map;
   std::map<off_t, librados::CacheRequest*> cache_aio_map;
+  std::map<off_t, librados::AioCompletion *> completion_map;
+
   char *tmp_data;
+  
 
   get_obj_data(CephContext *_cct);
-  ~get_obj_data(); 
+
+  get_obj_data(RGWRados* store, RGWGetDataCB* cb, rgw::Aio* aio,
+               uint64_t offset, optional_yield yield, Throttle *throttle)
+               : store(store), client_cb(cb), aio(aio), offset(offset), yield(yield),
+               throttle(throttle) {}
+  
+
+  ~get_obj_data();
+
+  void add_pending_oid(std::string oid); 
   void set_cancelled(int r);
   bool is_cancelled();
   int get_err_code();
@@ -1708,6 +1740,50 @@ struct get_obj_data : public RefCountedObject {
 
   int submit_l1_aio_read(librados::L1CacheRequest *cc);
   int submit_l1_io_read(bufferlist *bl, int len, string oid);
+
+  
+  int flush(rgw::AioResultList&& results) {
+    int r = rgw::check_for_errors(results);
+    if (r < 0) {
+      return r;
+    }
+
+    auto cmp = [](const auto& lhs, const auto& rhs) { return lhs.id < rhs.id; };
+    results.sort(cmp); // merge() requires results to be sorted first
+    completed.merge(results, cmp); // merge results in sorted order
+
+    while (!completed.empty() && completed.front().id == offset) {
+      auto bl = std::move(completed.front().data);
+      completed.pop_front_and_dispose(std::default_delete<rgw::AioResultEntry>{});
+
+      offset += bl.length();
+      int r = client_cb->handle_data(bl, 0, bl.length());
+      if (r < 0) {
+        return r;
+      }
+    }
+    return 0;
+  }
+  
+  void cancel() {
+    // wait for all completions to drain and ignore the results
+    aio->drain();
+  }
+
+  int drain() {
+    auto c = aio->wait();
+    while (!c.empty()) {
+      int r = flush(std::move(c));
+      if (r < 0) {
+        cancel();
+        return r;
+      }
+      c = aio->wait();
+    }
+    return flush(std::move(c));
+  }
 };
-*/
+
+
+
 #endif

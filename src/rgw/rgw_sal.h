@@ -319,7 +319,7 @@ class RGWStoreManager {
 public:
   RGWStoreManager() {}
   static rgw::sal::RGWRadosStore *get_storage(CephContext *cct, bool use_gc_thread, bool use_lc_thread, bool quota_threads,
-			       bool run_sync_thread, bool run_reshard_thread, bool use_metacache = true, bool use_datacache = false) {
+			       bool run_sync_thread, bool run_reshard_thread, bool use_metacache = true, bool use_datacache = true) {
     rgw::sal::RGWRadosStore *store = init_storage_provider(cct, use_gc_thread, use_lc_thread,
 	quota_threads, run_sync_thread, run_reshard_thread, use_metacache, use_datacache);
     return store;
