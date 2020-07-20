@@ -480,7 +480,6 @@ class RGWRados
                          bool follow_olh, optional_yield y, bool assume_noent = false);
   int append_atomic_test(RGWObjectCtx *rctx, const RGWBucketInfo& bucket_info, const rgw_obj& obj,
                          librados::ObjectOperation& op, RGWObjState **state, optional_yield y);
-  int append_atomic_test(const RGWObjState* astate, librados::ObjectOperation& op);
 
   int update_placement_map();
   int store_bucket_info(RGWBucketInfo& info, map<string, bufferlist> *pattrs, RGWObjVersionTracker *objv_tracker, bool exclusive);
@@ -640,7 +639,7 @@ public:
   /** Initialize the RADOS instance and prepare to do other ops */
   int init_svc(bool raw);
   int init_ctl();
-  int init_rados();
+  virtual int init_rados();
   int init_complete();
   int initialize();
   void finalize();
@@ -1279,11 +1278,12 @@ public:
                   uint64_t max_chunk_size, iterate_obj_cb cb, void *arg,
                   optional_yield y);
 
-  
+  int append_atomic_test(const RGWObjState* astate, librados::ObjectOperation& op);
+
   // FIXME: #CACHEREBASE
   virtual int flush_read_list(struct get_obj_data *d);
   //virtual int get_obj_iterate_cb(const rgw_raw_obj& read_obj, off_t obj_ofs,
-  int get_obj_iterate_cb(const rgw_raw_obj& read_obj, off_t obj_ofs,
+  virtual int get_obj_iterate_cb(const rgw_raw_obj& read_obj, off_t obj_ofs,
                          off_t read_ofs, off_t len, bool is_head_obj,
                          RGWObjState *astate, void *arg);
 
@@ -1693,7 +1693,7 @@ struct get_obj_data : public RefCountedObject{
   std::mutex data_lock;
   std::mutex cache_lock;
   std::mutex l2_lock;
-  Throttle* throttle;
+  Throttle throttle;
   std::atomic<bool> cancelled = { false };
   std::atomic<int64_t> err_code = { 0 };
   std::list<get_obj_aio_data> aio_data;
@@ -1709,9 +1709,9 @@ struct get_obj_data : public RefCountedObject{
   get_obj_data(CephContext *_cct);
 
   get_obj_data(RGWRados* store, RGWGetDataCB* cb, rgw::Aio* aio,
-               uint64_t offset, optional_yield yield, Throttle *throttle)
+               uint64_t offset, optional_yield yield, Throttle throttle)
                : store(store), client_cb(cb), aio(aio), offset(offset), yield(yield),
-               throttle(throttle) {}
+               throttle(cct, "get_obj_data", cct->_conf->rgw_get_obj_window_size, false) {}
   
 
   ~get_obj_data();

@@ -377,11 +377,22 @@ class RGWDataCache : public T
 public:
   RGWDataCache() {}
 
+  int init_rados() override {
+    int ret;
+    data_cache.init(T::cct);
+    ret = T::init_rados();
+    if (ret < 0)
+      return ret;
+
+    return 0;
+  }
+
+
   int flush_read_list(struct get_obj_data *d);
   
   int get_obj_iterate_cb(const rgw_raw_obj& read_obj, off_t obj_ofs,
                          off_t read_ofs, off_t len, bool is_head_obj,
-                         RGWObjState *astate, void *arg);
+                         RGWObjState *astate, void *arg) override;
   /* 
   (RGWObjectCtx *ctx, RGWObjState *astate,
       const RGWBucketInfo& bucket_info, const rgw_obj& obj,
@@ -398,8 +409,10 @@ int RGWDataCache<T>::flush_read_list(struct get_obj_data *d) {
 
   mydout(20) << "AMAT: In Flush read list Cache file" << dendl;
   d->data_lock.lock();
-  list<bufferlist> l;
+  std::list<bufferlist> l;
   l.swap(d->read_list);
+  mydout(20) << "D Read List: " << d->read_list.size() << dendl;
+  mydout(20) << "L Read list size: " << l.size() << dendl;
   d->get();
   mydout(20) << "AMAT: After d->get()" << dendl;
   d->read_list.clear();
@@ -409,10 +422,11 @@ int RGWDataCache<T>::flush_read_list(struct get_obj_data *d) {
   int r = 0;
 
   std::string oid;
-  list<bufferlist>::iterator iter;
+  std::list<bufferlist>::iterator iter;
   for (iter = l.begin(); iter != l.end(); ++iter) {
     bufferlist& bl = *iter;
     oid = d->get_pending_oid();
+    mydout(20) << "AMAT: In Flush read list Cache file For loop" << dendl;
     if (bl.length() == 0x400000)
       data_cache.put(bl, bl.length(), oid);
     r = d->client_cb->handle_data(bl, 0, bl.length());
@@ -432,7 +446,7 @@ int RGWDataCache<T>::flush_read_list(struct get_obj_data *d) {
 
 }
 
-template<class T>
+template<typename T>
 int RGWDataCache<T>::get_obj_iterate_cb(const rgw_raw_obj& read_obj, off_t obj_ofs,
                                  off_t read_ofs, off_t len, bool is_head_obj,
                                  RGWObjState *astate, void *arg) {
@@ -448,6 +462,7 @@ int RGWDataCache<T>::get_obj_iterate_cb(const rgw_raw_obj& read_obj, off_t obj_o
 
   if (is_head_obj) {
     // only when reading from the head object do we need to do the atomic test
+    mydout(20) << "AMAT: cache get_obj_iterate_cb in HEAD object" << dendl;
     r = T::append_atomic_test(astate, op);
     if (r < 0)
       return r;
@@ -472,7 +487,7 @@ int RGWDataCache<T>::get_obj_iterate_cb(const rgw_raw_obj& read_obj, off_t obj_o
     }
   }
 
-  d->throttle->get(len);
+  d->throttle.get(len);
   if (d->is_cancelled()) {
     return d->get_err_code();
   }

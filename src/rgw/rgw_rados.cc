@@ -1097,12 +1097,14 @@ int RGWRados::init_rados()
   if (ret < 0) {
     return ret;
   }
-
+  ldout(cct, 20) << "AMAT: In Rados Init!!!" << dendl;
   cr_registry = crs.release();
+  /*
   if(use_datacache) {
+    ldout(cct, 20) << "AMAT: use datacache is set" << dendl;
     datacache = new DataCache();
     datacache->init(cct);
-  }
+  } */
 
   return ret;
 }
@@ -6320,10 +6322,9 @@ get_obj_data::get_obj_data(CephContext *_cct)
   cache_lock(), 
   l2_lock(),
   yield(yield),
-  throttle(throttle) {};
+  throttle(cct, "get_obj_data", cct->_conf->rgw_get_obj_window_size, false) {};
   
 get_obj_data::~get_obj_data() {
-  ceph_assert(this);
 }
 
 
@@ -6341,6 +6342,7 @@ int get_obj_data::get_err_code() {
 }
 
 int get_obj_data::wait_next_io(bool *done) {
+  ldout(cct, 20) << "AMAT: In wait for next IO" << dendl;
   lock.lock();
   map<off_t, librados::AioCompletion *>::iterator iter = completion_map.begin();
   if (iter == completion_map.end()) {
@@ -6349,11 +6351,15 @@ int get_obj_data::wait_next_io(bool *done) {
     return 0;
   }
   off_t cur_ofs = iter->first;
+  ldout(cct, 20) << "AMAT: In wait for next IO current offset" << cur_ofs << dendl;
   librados::AioCompletion *c = iter->second;
   lock.unlock();
-
+  ldout(cct, 20) << "AMAT: In wait for next IO before wait for safe" << dendl;
   c->wait_for_safe_and_cb();
+  ldout(cct, 20) << "AMAT: In wait for next IO after wait for safe" << dendl;
   int r = c->get_return_value();
+  ldout(cct, 20) << "AMAT: In wait for next IO after return val" << dendl;
+
 
   lock.lock();
   completion_map.erase(cur_ofs);
@@ -6364,6 +6370,8 @@ int get_obj_data::wait_next_io(bool *done) {
   lock.unlock();
 
   c->release();
+  ldout(cct, 20) << "AMAT: In wait for next IO after release" << dendl;
+
 
   return r;
 }
@@ -6484,6 +6492,9 @@ std::vector<string> split(const string &s, const char * delim) {
 }
 
 bool get_obj_data::deterministic_hash_is_local(string oid) {
+  ldout(cct, 20) << "AMAT: In deterministic hash" << dendl;
+  ldout(cct,20) << "AMAT: hash result: " << deterministic_hash(oid) << dendl;
+  ldout(cct, 20) << "AMAT: RGW Host: " << cct->_conf->rgw_host << dendl;
 	return (deterministic_hash(oid).compare(cct->_conf->rgw_host)==0);
 }
 
@@ -6542,6 +6553,7 @@ int get_obj_data::add_l2_request(struct librados::L2CacheRequest **cc, bufferlis
 int get_obj_data::add_l1_request(struct librados::L1CacheRequest **cc, bufferlist *pbl, string oid,
 		size_t len, off_t ofs, off_t read_ofs, string key, librados::AioCompletion *lc)
 {
+  ldout(cct, 20) << "AMAT: In L1 Request" << dendl;
   librados::L1CacheRequest *c = new librados::L1CacheRequest(cct);
   c->sequence = sequence++;
   c->pbl = pbl;
@@ -6606,6 +6618,7 @@ END:
 int get_obj_data::submit_l1_aio_read(librados::L1CacheRequest *cc) {
 
   int r = 0;
+  ldout(cct, 20) << "AMAT: In L1 AIO Read" << dendl;
   if((r= ::aio_read(cc->paiocb)) != 0) {
     ldout(cct, 0) << "ERROR: aio_read ::aio_read"<< r << dendl;
   }
@@ -6681,7 +6694,7 @@ void RGWRados::get_obj_aio_completion_cb(completion_t c, void *arg)
   int r;
 
   ldout(cct, 20) << "get_obj_aio_completion_cb: io completion ofs=" << ofs << " len=" << len << dendl;
-  d->throttle->put(len);
+  d->throttle.put(len);
 
   r = rados_aio_get_return_value(c);
   if (r < 0) {
@@ -6757,6 +6770,8 @@ int RGWRados::get_obj_iterate_cb(const rgw_raw_obj& read_obj, off_t obj_ofs,
 
   if (is_head_obj) {
     /* only when reading from the head object do we need to do the atomic test */
+      ldout(cct, 20) << "AMAT: get_obj_iterate_cb in HEAD object" << dendl;
+
     int r = append_atomic_test(astate, op);
     if (r < 0)
       return r;
@@ -6782,7 +6797,7 @@ int RGWRados::get_obj_iterate_cb(const rgw_raw_obj& read_obj, off_t obj_ofs,
     }
   }
 
-  d->throttle->get(len);
+  d->throttle.get(len);
   if(d->is_cancelled()) {
     return d->get_err_code();
   }
@@ -6831,6 +6846,7 @@ int RGWRados::get_obj_iterate_cb(const rgw_raw_obj& read_obj, off_t obj_ofs,
 int RGWRados::Object::Read::iterate(int64_t ofs, int64_t end, RGWGetDataCB *cb,
                                     optional_yield y)
 {
+  
   RGWRados *store = source->get_store();
   CephContext *cct = store->ctx();
   RGWObjectCtx& obj_ctx = source->get_ctx();
@@ -6845,9 +6861,8 @@ int RGWRados::Object::Read::iterate(int64_t ofs, int64_t end, RGWGetDataCB *cb,
   data->store = store;
   data->client_cb = cb;
   data->aio = &*aio;
-  data->offset = ofs;
-  data->yield = y;
-  data->throttle = &throttle;
+  data->io_ctx.dup(*state.cur_ioctx);
+  ldout(cct, 20) << "AMAT: Ofs: " << ofs << " End: " << end << dendl;
 
 
   // get_obj_data data(store, cb, &*aio, ofs, y, &throttle);
@@ -6939,6 +6954,9 @@ int RGWRados::iterate_obj(RGWObjectCtx& obj_ctx,
     RGWObjManifest::obj_iterator obj_end = manifest.obj_end();
 
     for (; iter != obj_end && ofs <= end; ++iter) {
+
+      ldout(cct, 20) << "AMAT: End: " << end << dendl;
+
       off_t stripe_ofs = iter.get_stripe_ofs();
       off_t next_stripe_ofs = stripe_ofs + iter.get_stripe_size();
 
@@ -6947,13 +6965,18 @@ int RGWRados::iterate_obj(RGWObjectCtx& obj_ctx,
         uint64_t read_len = std::min(len, iter.get_stripe_size() - (ofs - stripe_ofs));
         read_ofs = iter.location_ofs() + (ofs - stripe_ofs);
 
+        ldout(cct, 20) << "AMAT: Read length: " << read_len << dendl;
         if (read_len > max_chunk_size) {
           read_len = max_chunk_size;
         }
+        ldout(cct, 20) << "AMAT: Read length after chunk size compare: " << read_len << dendl;
 
         //amat
-        // Check if we have a head object or tail object 
+        // Check if we have a head object or tail object
+        ldout(cct, 20) << "AMAT: Read obj = " << read_obj << dendl;
+        ldout(cct, 20) << "AMAT: Head object = " << head_obj << dendl;
         reading_from_head = (read_obj == head_obj);
+        ldout(cct, 20) << "AMAT: Reading from head = " << reading_from_head << dendl;
         r = cb(read_obj, ofs, read_ofs, read_len, reading_from_head, astate, arg);
         if (r < 0) {
           return r;

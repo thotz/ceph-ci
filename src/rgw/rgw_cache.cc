@@ -669,7 +669,7 @@ void HttpL2Request::run() {
   for (int i=0; i<n_retries; i++ ){
     if(!(r = submit_http_request())){
       // FIXME: #CACHEREBASE
-      //d->cache_aio_completion_cb(req);
+      d->cache_aio_completion_cb(req);
       return;
     }
     if (r == ECANCELED) {
