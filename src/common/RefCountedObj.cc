@@ -24,7 +24,6 @@ void RefCountedObject::put() const {
   if (v == 0) {
     ANNOTATE_HAPPENS_AFTER(&nref);
     ANNOTATE_HAPPENS_BEFORE_FORGET_ALL(&nref);
-    //lsubdout(cct, refs, 1) << "AMAT: Before delete this " << dendl; 
     delete this;
   } else {
     ANNOTATE_HAPPENS_BEFORE(&nref);

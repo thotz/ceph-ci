@@ -28,7 +28,6 @@
 #include "rgw_sync_module.h"
 #include "rgw_trim_bilog.h"
 #include "rgw_service.h"
-#include "rgw_cache.h"
 #include "rgw_aio.h"
 
 #include "services/svc_rados.h"
@@ -54,7 +53,6 @@ class RGWReshardWait;
 
 class RGWSysObjectCtx;
 struct get_obj_data;
-struct DataCache;
 
 /* flags for put_obj_meta() */
 #define PUT_OBJ_CREATE      0x01
@@ -536,7 +534,6 @@ public:
 
   RGWRados& set_use_datacache(bool status) {
     use_datacache = status;
-    std::cout << "AMAT: Setting Datacache bool: " << status << "\n";
     return *this;
   }
 
@@ -1096,7 +1093,6 @@ public:
     ATTRSMOD_MERGE   = 2
   };
 
-  DataCache *datacache;
 
   int rewrite_obj(RGWBucketInfo& dest_bucket_info, const rgw_obj& obj, const DoutPrefixProvider *dpp, optional_yield y);
 
@@ -1284,8 +1280,8 @@ public:
   virtual int flush_read_list(struct get_obj_data *d);
   //virtual int get_obj_iterate_cb(const rgw_raw_obj& read_obj, off_t obj_ofs,
   virtual int get_obj_iterate_cb(const rgw_raw_obj& read_obj, off_t obj_ofs,
-                         off_t read_ofs, off_t len, bool is_head_obj,
-                         RGWObjState *astate, void *arg);
+                                 off_t read_ofs, off_t len, bool is_head_obj,
+                                 RGWObjState *astate, void *arg);
 
   void get_obj_aio_completion_cb(librados::completion_t cb, void *arg);
 
@@ -1566,8 +1562,6 @@ public:
 };
 
 
-// ANCHOR: #CACHEREBASE
-
 struct get_obj_aio_data {
   struct get_obj_data *op_data;
   off_t ofs;
@@ -1672,18 +1666,15 @@ struct librados::L2CacheRequest : public librados::CacheRequest {
 };
 
 
-// FIXME: #CACHEREBASE
-
-
 struct get_obj_data : public RefCountedObject{
-  CephContext* cct; //amat
+  CephContext* cct; 
   RGWRados* store;
   RGWGetDataCB* client_cb;
-  RGWObjectCtx* ctx; //amat
+  RGWObjectCtx* ctx; 
   librados::IoCtx io_ctx;
   rgw::Aio* aio;
   uint64_t offset; // next offset to write to client
-  uint64_t total_read; //amat
+  uint64_t total_read;
   int sequence;
 
   rgw::AioResultList completed; // completed read results, sorted by offset

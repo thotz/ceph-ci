@@ -442,7 +442,7 @@ void DataCache::cache_aio_write_completion_cb(cacheAioWriteRequest *c){
 
   ldout(cct, 0) << "engage: cache_aio_write_completion_cb oid:" << c->oid <<dendl;
 
-  /*update cahce_map entries for new chunk in cache*/
+  /*update cache_map entries for new chunk in cache*/
   cache_lock.lock();
   outstanding_write_list.remove(c->oid);
   chunk_info = new ChunkDataInfo;
@@ -542,7 +542,6 @@ bool DataCache::get(string oid) {
 
   bool exist = false;
   string location = cct->_conf->rgw_datacache_persistent_path + oid;
-  ldout(cct, 20) << "AMAT: File Location for Read: " << location << dendl;
   cache_lock.lock();
   map<string, ChunkDataInfo*>::iterator iter = cache_map.find(oid);
   if (!(iter == cache_map.end())){
@@ -551,12 +550,12 @@ bool DataCache::get(string oid) {
     if(access(location.c_str(), F_OK ) != -1 ) { // file exists
       exist = true;
       {
-      /*LRU*/
-      /*get ChunkDataInfo*/
-      eviction_lock.lock();
-      lru_remove(chdo);
-      lru_insert_head(chdo);
-      eviction_lock.unlock();
+        /*LRU*/
+        /*get ChunkDataInfo*/
+        eviction_lock.lock();
+        lru_remove(chdo);
+        lru_insert_head(chdo);
+        eviction_lock.unlock();
       }
     } else {	
       cache_map.erase(oid);
@@ -603,7 +602,6 @@ size_t DataCache::random_eviction(){
 size_t DataCache::lru_eviction(){
 
   int n_entries = 0;
-  int random_index = 0;
   size_t freed_size = 0;
   ChunkDataInfo *del_entry;
   string del_oid, location;
