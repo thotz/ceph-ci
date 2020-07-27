@@ -25,6 +25,7 @@ tasks:
         - pauserd,pausewr flag\(s\) set
         - Monitor daemon marked osd\.[[:digit:]]+ down, but it is still running
         - evicting unresponsive client .+
+        - 1 OSDs or CRUSH {nodes, device-classes} have {NOUP,NODOWN,NOIN,NOOUT} flags set (OSD_FLAGS)
   - rgw: [client.0]
   - cephfs_test_runner:
       fail_on_skip: false
