@@ -396,7 +396,7 @@ done:
 }
 
 DataCache::DataCache ()
-  : index(0), lock("DataCache"), cache_lock("DataCache::Mutex"), req_lock("DataCache::req"), eviction_lock("DataCache::EvictionMutex"), cct(NULL), io_type(ASYNC_IO), free_data_cache_size(0), outstanding_write_size (0)
+  : index(0), cct(NULL), io_type(ASYNC_IO), free_data_cache_size(0), outstanding_write_size (0)
 {
   tp = new L2CacheThreadPool(32);
 }

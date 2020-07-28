@@ -33,6 +33,7 @@
 #include "services/svc_rados.h"
 #include "services/svc_bi_rados.h"
 #include "common/Throttle.h"
+#include "common/ceph_mutex.h"
 
 class RGWWatcher;
 class SafeTimer;
@@ -1572,7 +1573,7 @@ struct get_obj_io {
 
 class librados::CacheRequest {
   public:
-    ceph::mutex lock;
+    ceph::mutex lock = ceph::make_mutex("CacheRequest");
     int sequence;
     bufferlist *pbl;
     struct get_obj_data *op_data;
@@ -1584,7 +1585,7 @@ class librados::CacheRequest {
     off_t read_ofs;
     Context *onack;
     CephContext *cct;
-    CacheRequest(CephContext *_cct) : lock("CacheRequest"), sequence(0), pbl(NULL), op_data(NULL), ofs(0), lc(NULL), read_ofs(0), cct(_cct) {};
+    CacheRequest(CephContext *_cct) : sequence(0), pbl(NULL), op_data(NULL), ofs(0), lc(NULL), read_ofs(0), cct(_cct) {};
     virtual ~CacheRequest(){};
     virtual void release()=0;
     virtual void cancel_io()=0;
