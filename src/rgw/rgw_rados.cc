@@ -2244,6 +2244,13 @@ int RGWRados::create_bucket(const RGWUserInfo& owner, rgw_bucket& bucket,
       info.layout.current_index.layout.normal.num_shards = bucket_index_max_shards;
     }
     info.layout.current_index.layout.normal.hash_type = rgw::BucketHashType::Mod;
+    if (info.layout.current_index.layout.type == rgw::BucketIndexType::Normal) {
+      // use the same index layout for the bilog
+      const auto gen = info.layout.current_index.gen;
+      const auto& index = info.layout.current_index.layout.normal;
+      info.layout.logs.push_back(rgw::log_layout_from_index(gen, index));
+    }
+
     info.requester_pays = false;
     if (real_clock::is_zero(creation_time)) {
       info.creation_time = ceph::real_clock::now();
