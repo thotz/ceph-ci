@@ -6716,6 +6716,7 @@ int RGWRados::get_obj_iterate_cb(const rgw_raw_obj& read_obj, off_t obj_ofs,
   string oid, key;
   bufferlist *pbl;
   AioCompletion *c;
+  int r;
 
   if (is_head_obj) {
     /* only when reading from the head object do we need to do the atomic test */
@@ -6751,22 +6752,8 @@ int RGWRados::get_obj_iterate_cb(const rgw_raw_obj& read_obj, off_t obj_ofs,
 
   d->add_io(obj_ofs, len, &pbl, &c);
 
-  auto obj = d->store->svc.rados->obj(read_obj);
-  int r = obj.open();
-  if (r < 0) {
-    ldout(cct, 4) << "failed to open rados context for " << read_obj << dendl;
-    return r;
-  }
-
   ldout(cct, 20) << "rados->get_obj_iterate_cb oid=" << read_obj.oid << " obj-ofs=" << obj_ofs << " read_ofs=" << read_ofs << " len=" << len << dendl;
-  op.read(read_ofs, len, nullptr, nullptr);
-
-  const uint64_t cost = len;
-  const uint64_t id = obj_ofs; // use logical object offset for sorting replies
-
-  auto completed = d->aio->get(obj, rgw::Aio::librados_op(std::move(op), d->yield), cost, id);
-
-  return d->flush(std::move(completed));
+  op.read(read_ofs, len, pbl, nullptr);
 
   librados::IoCtx io_ctx(d->io_ctx);
   io_ctx.locator_set_key(read_obj.loc);
@@ -6806,6 +6793,7 @@ int RGWRados::Object::Read::iterate(int64_t ofs, int64_t end, RGWGetDataCB *cb,
   data->client_cb = cb;
   data->aio = &*aio;
   data->io_ctx.dup(*state.cur_ioctx);
+  data->yield = y;
   int r = store->iterate_obj(obj_ctx, source->get_bucket_info(), state.obj,
                              ofs, end, chunk_size, _get_obj_iterate_cb, (void *)data, y);
 
