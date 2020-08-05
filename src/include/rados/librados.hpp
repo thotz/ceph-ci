@@ -14,6 +14,8 @@
 #include "librados_fwd.hpp"
 #include "rados_types.hpp"
 
+class CacheRequest;
+
 namespace libradosstriper
 {
   class RadosStriper;
@@ -31,13 +33,10 @@ struct ListObjectImpl;
 class NObjectIteratorImpl;
 struct ObjListCtx;
 class ObjectOperationImpl;
-  class CacheRequest;
   struct PlacementGroupImpl;
 struct PoolAsyncCompletionImpl;
 
 typedef struct rados_cluster_stat_t cluster_stat_t;
-  struct L2CacheRequest;
-  struct L1CacheRequest;
 typedef struct rados_pool_stat_t pool_stat_t;
 
 typedef void *list_ctx_t;

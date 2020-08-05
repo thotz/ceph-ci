@@ -637,7 +637,7 @@ size_t DataCache::lru_eviction(){
 }
 
 
-void DataCache::remote_io(struct librados::L2CacheRequest *l2request ) {
+void DataCache::remote_io(struct L2CacheRequest *l2request ) {
   ldout(cct, 20) << "Engage1: Add task to remote IO" << dendl;
   tp->addTask(new HttpL2Request(l2request, cct));
 }
@@ -653,12 +653,12 @@ std::vector<string> split(const std::string &s, char * delim) {
   return tokens;
 }
 
-void DataCache::push_l2_request(struct librados::L2CacheRequest *l2request ) {
+void DataCache::push_l2_request(L2CacheRequest *l2request ) {
   tp->addTask(new HttpL2Request(l2request, cct));
 }
 
 static size_t _l2_response_cb(void *ptr, size_t size, size_t nmemb, void* param) {
-  librados::L2CacheRequest *req = static_cast<librados::L2CacheRequest *>(param);
+  L2CacheRequest *req = static_cast<L2CacheRequest *>(param);
   req->pbl->append((char *)ptr, size*nmemb);
   return size*nmemb;
 }

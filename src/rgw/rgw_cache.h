@@ -24,6 +24,7 @@
 #include "include/Context.h" /*engage1*/
 #include "include/lru.h" /*engage1*/
 #include "rgw_threadpool.h"
+#include "rgw_cacherequest.h"
 
 enum {
   UPDATE_OBJ,
@@ -125,9 +126,9 @@ public:
   size_t lru_eviction();
   std::string hash_uri(std::string dest);
   std::string deterministic_hash(std::string oid);
-  void remote_io(struct librados::L2CacheRequest *l2request); 
+  void remote_io(struct L2CacheRequest *l2request); 
   void init_l2_request_cb(librados::completion_t c, void *arg);
-  void push_l2_request(librados::L2CacheRequest*l2request);
+  void push_l2_request(L2CacheRequest *l2request);
   void l2_http_request(off_t ofs , off_t len, std::string oid);
   void init(CephContext *_cct) {
     cct = _cct;
@@ -482,9 +483,9 @@ int RGWDataCache<T>::get_obj_iterate_cb(const rgw_raw_obj& read_obj, off_t obj_o
   d->add_pending_oid(read_obj.oid);
 
   if (data_cache.get(read_obj.oid)) {
-    librados::L1CacheRequest *cc;
+    L1CacheRequest *cc;
     d->add_l1_request(&cc, pbl, read_obj.oid, len, obj_ofs, read_ofs, key, c);
-    r = io_ctx.cache_aio_notifier(read_obj.oid, dynamic_cast<librados::CacheRequest*>(cc));
+    r = io_ctx.cache_aio_notifier(read_obj.oid, dynamic_cast<CacheRequest*>(cc));
     r = d->submit_l1_aio_read(cc);
     if (r != 0 ){
       mydout(0) << "Error cache_aio_read failed err=" << r << dendl;
@@ -499,10 +500,10 @@ int RGWDataCache<T>::get_obj_iterate_cb(const rgw_raw_obj& read_obj, off_t obj_o
       goto done_err;
     }
   }  else {
-    librados::L2CacheRequest *cc;
+    L2CacheRequest *cc;
     d->add_l2_request(&cc, pbl, read_obj.oid, obj_ofs, read_ofs, len, key, c);
 //    r = d->add_cache_notifier(oid, c);
-    r = io_ctx.cache_aio_notifier(read_obj.oid, dynamic_cast<librados::CacheRequest*>(cc)); 
+    r = io_ctx.cache_aio_notifier(read_obj.oid, dynamic_cast<CacheRequest*>(cc)); 
     data_cache.push_l2_request(cc);
   } 
 
@@ -556,7 +557,7 @@ private:
 
 class HttpL2Request : public Task {
 public:
-  HttpL2Request(librados::L2CacheRequest *_req, CephContext *_cct) : Task(), req(_req), cct(_cct) {
+  HttpL2Request(L2CacheRequest *_req, CephContext *_cct) : Task(), req(_req), cct(_cct) {
     pthread_mutex_init(&qmtx,0);
     pthread_cond_init(&wcond, 0);
   }
@@ -574,7 +575,7 @@ private:
 private:
   pthread_mutex_t qmtx;
   pthread_cond_t wcond;
-  librados::L2CacheRequest *req;
+  L2CacheRequest *req;
   CURL *curl_handle;
   CephContext *cct;
 };

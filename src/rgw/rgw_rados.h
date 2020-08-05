@@ -29,6 +29,7 @@
 #include "rgw_trim_bilog.h"
 #include "rgw_service.h"
 #include "rgw_aio.h"
+#include "rgw_cacherequest.h"
 
 #include "services/svc_rados.h"
 #include "services/svc_bi_rados.h"
@@ -1571,99 +1572,6 @@ struct get_obj_io {
   bufferlist bl;
 };
 
-class librados::CacheRequest {
-  public:
-    ceph::mutex lock = ceph::make_mutex("CacheRequest");
-    int sequence;
-    bufferlist *pbl;
-    struct get_obj_data *op_data;
-    std::string oid;
-    off_t ofs;
-    off_t len;
-    librados::AioCompletion *lc;
-    std::string key;
-    off_t read_ofs;
-    Context *onack;
-    CephContext *cct;
-    CacheRequest(CephContext *_cct) : sequence(0), pbl(NULL), op_data(NULL), ofs(0), lc(NULL), read_ofs(0), cct(_cct) {};
-    virtual ~CacheRequest(){};
-    virtual void release()=0;
-    virtual void cancel_io()=0;
-    virtual int status()=0;
-    virtual void finish()=0;
-};
-
-struct librados::L1CacheRequest : public librados::CacheRequest{
-  int stat;
-  struct aiocb *paiocb;
-  L1CacheRequest(CephContext *_cct) :  CacheRequest(_cct), stat(-1), paiocb(NULL) {}
-  ~L1CacheRequest(){}
-  void release (){
-    lock.lock();
-    free((void *)paiocb->aio_buf);
-    paiocb->aio_buf = NULL;
-    ::close(paiocb->aio_fildes);
-    free(paiocb);
-    lock.unlock();
-    delete this;
-	}
-
-  void cancel_io(){
-    lock.lock();
-    stat = ECANCELED;
-    lock.unlock();
-  }
-
-  int status(){
-    lock.lock();
-    if (stat != EINPROGRESS) {
-      lock.unlock();
-      if (stat == ECANCELED){
-        release();
-        return ECANCELED;
-      }
-    }
-    stat = aio_error(paiocb);
-    lock.unlock();
-    return stat;
-  }
-
-  void finish(){
-    pbl->append((char*)paiocb->aio_buf, paiocb->aio_nbytes);
-    onack->complete(0);
-    release();
-  }
-};
-
-struct librados::L2CacheRequest : public librados::CacheRequest {
-  size_t read;
-  int stat;
-  void *tp;
-  string dest;
-  L2CacheRequest(CephContext *_cct) : CacheRequest(_cct), read(0), stat(-1) {}
-  ~L2CacheRequest(){}
-  void release (){
-    lock.lock();
-    lock.unlock();
-  }
-
-  void cancel_io(){
-    lock.lock();
-    stat = ECANCELED;
-    lock.unlock();
-  }
-
-  void finish(){
-    onack->complete(0);
-    release();
-  }
-
-  int status(){
-    return 0;
-  }
-};
-
-
 struct get_obj_data : public RefCountedObject{
   CephContext* cct; 
   RGWRados* store;
@@ -1689,7 +1597,7 @@ struct get_obj_data : public RefCountedObject{
   std::list<bufferlist> read_list;
   std::list<string> pending_oid_list;
   std::map<off_t, get_obj_io> io_map;
-  std::map<off_t, librados::CacheRequest*> cache_aio_map;
+  std::map<off_t, CacheRequest*> cache_aio_map;
   std::map<off_t, librados::AioCompletion *> completion_map;
 
   char *tmp_data;
@@ -1719,15 +1627,15 @@ struct get_obj_data : public RefCountedObject{
   string get_pending_oid();
   bool deterministic_hash_is_local(string oid);
   string deterministic_hash(string oid);
-  int add_l1_request(struct librados::L1CacheRequest **cc, bufferlist *pbl, string oid,
+  int add_l1_request(struct L1CacheRequest **cc, bufferlist *pbl, string oid,
       size_t len, off_t ofs, off_t read_ofs, string key, librados::AioCompletion *lc);
-  int add_l2_request(struct librados::L2CacheRequest **cc, bufferlist *pbl, string oid,
+  int add_l2_request(struct L2CacheRequest **cc, bufferlist *pbl, string oid,
       off_t obj_ofs, off_t read_ofs, size_t len, string key, librados::AioCompletion *lc);
   int add_cache_notifier(std::string oid, librados::AioCompletion *lc);
-  void cache_aio_completion_cb(librados::CacheRequest *c);
+  void cache_aio_completion_cb(CacheRequest *c);
   void cache_unmap_io(off_t ofs);
 
-  int submit_l1_aio_read(librados::L1CacheRequest *cc);
+  int submit_l1_aio_read(L1CacheRequest *cc);
   int submit_l1_io_read(bufferlist *bl, int len, string oid);
 
   

@@ -6479,10 +6479,10 @@ string get_obj_data::get_pending_oid()
   return str;
 }
 
-int get_obj_data::add_l2_request(struct librados::L2CacheRequest **cc, bufferlist *pbl, string oid,
+int get_obj_data::add_l2_request(struct L2CacheRequest **cc, bufferlist *pbl, string oid,
                 off_t obj_ofs, off_t read_ofs, size_t len, string key, librados::AioCompletion *lc)
 {
-  librados::L2CacheRequest *l2request = new librados::L2CacheRequest(cct);
+  L2CacheRequest *l2request = new L2CacheRequest(cct);
   l2request->sequence = sequence; sequence+=1;
   l2request->ofs = obj_ofs;
   l2request->len = len;
@@ -6502,10 +6502,10 @@ int get_obj_data::add_l2_request(struct librados::L2CacheRequest **cc, bufferlis
   return 0;
 }
 
-int get_obj_data::add_l1_request(struct librados::L1CacheRequest **cc, bufferlist *pbl, string oid,
+int get_obj_data::add_l1_request(struct L1CacheRequest **cc, bufferlist *pbl, string oid,
 		size_t len, off_t ofs, off_t read_ofs, string key, librados::AioCompletion *lc)
 {
-  librados::L1CacheRequest *c = new librados::L1CacheRequest(cct);
+  L1CacheRequest *c = new L1CacheRequest(cct);
   c->sequence = sequence++;
   c->pbl = pbl;
   c->oid = oid;
@@ -6566,7 +6566,7 @@ END:
   return r;
 }
 
-int get_obj_data::submit_l1_aio_read(librados::L1CacheRequest *cc) {
+int get_obj_data::submit_l1_aio_read(L1CacheRequest *cc) {
 
   int r = 0;
   if((r= ::aio_read(cc->paiocb)) != 0) {
@@ -6577,11 +6577,11 @@ int get_obj_data::submit_l1_aio_read(librados::L1CacheRequest *cc) {
 
 void _cache_aio_completion_cb(sigval_t sigval)
 { 
-  librados::CacheRequest *c = static_cast<librados::CacheRequest *>(sigval.sival_ptr);
+  CacheRequest *c = static_cast<CacheRequest *>(sigval.sival_ptr);
   c->op_data->cache_aio_completion_cb(c);
 }
 
-void get_obj_data::cache_aio_completion_cb(librados::CacheRequest *c){
+void get_obj_data::cache_aio_completion_cb(CacheRequest *c){
 
   int status = c->status();
   if (status == ECANCELED) {
@@ -6600,7 +6600,7 @@ void get_obj_data::cache_aio_completion_cb(librados::CacheRequest *c){
 void get_obj_data::cache_unmap_io(off_t ofs){
 	
   cache_lock.lock();
-  map<off_t, struct librados::CacheRequest *>::iterator iter = cache_aio_map.find(ofs);
+  map<off_t, struct CacheRequest *>::iterator iter = cache_aio_map.find(ofs);
   if (iter == cache_aio_map.end()) {
     cache_lock.unlock();
     return;
