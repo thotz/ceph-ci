@@ -57,11 +57,19 @@
 #define HAVE_MSGR2_FEATURE(x, name) \
 	(((x) & (CEPH_MSGR2_FEATUREMASK_##name)) == (CEPH_MSGR2_FEATUREMASK_##name))
 
-DEFINE_MSGR2_FEATURE( 0, 1, REVISION_1)   // msgr2.1
+DEFINE_MSGR2_FEATURE(0, 1, REVISION_1)   // msgr2.1
+DEFINE_MSGR2_FEATURE(1, 1, COMPRESSION)  // on-wire compression
 
-#define CEPH_MSGR2_SUPPORTED_FEATURES (CEPH_MSGR2_FEATURE_REVISION_1)
+/*
+ * Features supported.  Should be everything above.
+ */
+#define CEPH_MSGR2_SUPPORTED_FEATURES \
+	(CEPH_MSGR2_FEATURE_REVISION_1 | \
+	 CEPH_MSGR2_FEATURE_COMPRESSION | \
+	 0ULL)
 
-#define CEPH_MSGR2_REQUIRED_FEATURES  (0ull)
+#define CEPH_MSGR2_REQUIRED_FEATURES (0ULL)
+
 
 
 /*
@@ -241,9 +249,9 @@ struct ceph_msg_footer {
 	__u8 flags;
 } __attribute__ ((packed));
 
-#define CEPH_MSG_FOOTER_COMPLETE  (1<<0)   /* msg wasn't aborted */
-#define CEPH_MSG_FOOTER_NOCRC     (1<<1)   /* no data crc */
-#define CEPH_MSG_FOOTER_SIGNED	  (1<<2)   /* msg was signed */
+#define CEPH_MSG_FOOTER_COMPLETE   (1<<0)   /* msg wasn't aborted */
+#define CEPH_MSG_FOOTER_NOCRC      (1<<1)   /* no data crc */
+#define CEPH_MSG_FOOTER_SIGNED	   (1<<2)   /* msg was signed */
 
 #ifndef __KERNEL__
 #undef __le16

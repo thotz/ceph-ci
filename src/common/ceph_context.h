@@ -87,11 +87,15 @@ public:
   PerfCountersCollectionImpl* get_perfcounters_collection();
   crimson::common::ConfigProxy& _conf;
   crimson::common::PerfCountersCollection& _perf_counters_collection;
+  ceph::PluginRegistry *get_plugin_registry() {
+    return _plugin_registry;
+  };
   CephContext* get();
   void put();
 private:
   std::unique_ptr<CryptoRandom> _crypto_random;
   unsigned nref;
+  ceph::PluginRegistry* _plugin_registry;
 };
 }
 #else
