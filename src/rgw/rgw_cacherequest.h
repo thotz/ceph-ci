@@ -9,13 +9,11 @@
 #include "include/rados/librados.hpp"
 #include "include/Context.h"
 
-#include "common/ceph_mutex.h"
-
 class CacheRequest {
   public:
-    ceph::mutex lock = ceph::make_mutex("CacheRequest");
+    std::mutex lock;
     int sequence;
-    bufferlist *pbl;
+    buffer::list *pbl;
     struct get_obj_data *op_data;
     std::string oid;
     off_t ofs;
@@ -41,9 +39,9 @@ struct L1CacheRequest : public CacheRequest{
   void release (){
     lock.lock();
     free((void *)paiocb->aio_buf);
-    paiocb->aio_buf = NULL;
+    paiocb->aio_buf = nullptr;
     ::close(paiocb->aio_fildes);
-    free(paiocb);
+    delete(paiocb);
     lock.unlock();
     delete this;
 	}

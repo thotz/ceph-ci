@@ -6714,7 +6714,7 @@ int RGWRados::get_obj_iterate_cb(const rgw_raw_obj& read_obj, off_t obj_ofs,
   ObjectReadOperation op;
   struct get_obj_data *d = (struct get_obj_data *)arg;
   string oid, key;
-  bufferlist *pbl;
+  buffer::list *pbl;
   AioCompletion *c;
   int r;
 

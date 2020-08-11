@@ -637,7 +637,7 @@ size_t DataCache::lru_eviction(){
 }
 
 
-void DataCache::remote_io(struct L2CacheRequest *l2request ) {
+void DataCache::remote_io(L2CacheRequest *l2request ) {
   ldout(cct, 20) << "Engage1: Add task to remote IO" << dendl;
   tp->addTask(new HttpL2Request(l2request, cct));
 }

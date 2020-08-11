@@ -91,10 +91,10 @@ private:
   std::map<string, ChunkDataInfo*> cache_map;
   std::list<string> outstanding_write_list;
   int index;
-  ceph::mutex lock = ceph::make_mutex("DataCache");
-  ceph::mutex cache_lock = ceph::make_mutex("DataCache::Mutex");
-  ceph::mutex req_lock = ceph::make_mutex("DataCache::req");
-  ceph::mutex eviction_lock = ceph::make_mutex("DataCache::EvictionMutex");
+  std::mutex lock;
+  std::mutex cache_lock;
+  std::mutex req_lock;
+  std::mutex eviction_lock;
  
   CephContext *cct;
   enum _io_type { 
