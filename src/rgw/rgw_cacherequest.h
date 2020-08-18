@@ -38,7 +38,7 @@ struct L1CacheRequest : public CacheRequest{
   ~L1CacheRequest(){}
   void release (){
     lock.lock();
-    free((void *)paiocb->aio_buf);
+    delete(paiocb->aio_buf);
     paiocb->aio_buf = nullptr;
     ::close(paiocb->aio_fildes);
     delete(paiocb);
