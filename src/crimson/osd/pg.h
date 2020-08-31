@@ -150,9 +150,7 @@ public:
     // Not needed yet -- mainly for scrub scheduling
   }
 
-  void scrub_requested(bool deep, bool repair, bool need_auto = false) final {
-    ceph_assert(0 == "Not implemented");
-  }
+  void scrub_requested(bool deep, bool repair, bool need_auto = false) final;
 
   uint64_t get_snap_trimq_size() const final {
     return 0;
@@ -284,7 +282,7 @@ public:
   void check_recovery_sources(const OSDMapRef& newmap) final {
     // Not needed yet
   }
-  void check_blacklisted_watchers() final {
+  void check_blocklisted_watchers() final {
     // Not needed yet
   }
   void clear_primary_state() final {
@@ -428,6 +426,9 @@ public:
   // Utility
   bool is_primary() const final {
     return peering_state.is_primary();
+  }
+  bool is_nonprimary() const {
+    return peering_state.is_nonprimary();
   }
   bool is_peered() const final {
     return peering_state.is_peered();

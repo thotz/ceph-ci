@@ -12,7 +12,7 @@ from .lock import GlobalLock
 from ..exception import VolumeException
 from ..fs_util import create_pool, remove_pool, create_filesystem, \
     remove_filesystem, create_mds, volume_exists
-from mgr_util import open_filesystem
+from mgr_util import open_filesystem, CephfsConnectionException
 
 log = logging.getLogger(__name__)
 
@@ -50,7 +50,7 @@ def create_volume(mgr, volname, placement):
     """
     metadata_pool, data_pool = gen_pool_names(volname)
     # create pools
-    r, outs, outb = create_pool(mgr, metadata_pool)
+    r, outb, outs = create_pool(mgr, metadata_pool)
     if r != 0:
         return r, outb, outs
     r, outb, outs = create_pool(mgr, data_pool)
@@ -65,9 +65,7 @@ def create_volume(mgr, volname, placement):
         #cleanup
         remove_pool(mgr, data_pool)
         remove_pool(mgr, metadata_pool)
-        return r, outb, outs
-    # create mds
-    return create_mds(mgr, volname, placement)
+    return r, outb, outs
 
 
 def delete_volume(mgr, volname, metadata_pool, data_pools):
@@ -135,8 +133,11 @@ def open_volume(vc, volname):
     """
     g_lock = GlobalLock()
     with g_lock.lock_op():
-        with open_filesystem(vc, volname) as fs_handle:
-            yield fs_handle
+        try:
+            with open_filesystem(vc, volname) as fs_handle:
+                yield fs_handle
+        except CephfsConnectionException as ce:
+            raise VolumeException(ce.errno, ce.error_str)
 
 
 @contextmanager
@@ -149,5 +150,8 @@ def open_volume_lockless(vc, volname):
     :param volname: volume name
     :return: yields a volume handle (ceph filesystem handle)
     """
-    with open_filesystem(vc, volname) as fs_handle:
-        yield fs_handle
+    try:
+        with open_filesystem(vc, volname) as fs_handle:
+            yield fs_handle
+    except CephfsConnectionException as ce:
+        raise VolumeException(ce.errno, ce.error_str)

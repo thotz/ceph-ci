@@ -10,7 +10,7 @@
 #include "common/Finisher.h"
 #include "common/valgrind.h"
 #include "objclass/objclass.h"
-#include <boost/bind.hpp>
+#include <functional>
 #include <errno.h>
 
 namespace librados {
@@ -109,7 +109,7 @@ int TestIoCtxImpl::aio_operate(const std::string& oid, TestObjectOperationImpl &
   // TODO flags for now
   ops.get();
   m_pending_ops++;
-  m_client->add_aio_operation(oid, true, boost::bind(
+  m_client->add_aio_operation(oid, true, std::bind(
     &TestIoCtxImpl::execute_aio_operations, this, oid, &ops,
     reinterpret_cast<bufferlist*>(0), m_snap_seq,
     snap_context != NULL ? *snap_context : m_snapc), c);
@@ -123,7 +123,7 @@ int TestIoCtxImpl::aio_operate_read(const std::string& oid,
   // TODO ignoring flags for now
   ops.get();
   m_pending_ops++;
-  m_client->add_aio_operation(oid, true, boost::bind(
+  m_client->add_aio_operation(oid, true, std::bind(
     &TestIoCtxImpl::execute_aio_operations, this, oid, &ops, pbl, snap_id,
     m_snapc), c);
   return 0;
@@ -134,8 +134,8 @@ int TestIoCtxImpl::aio_watch(const std::string& o, AioCompletionImpl *c,
   m_pending_ops++;
   c->get();
   C_AioNotify *ctx = new C_AioNotify(this, c);
-  if (m_client->is_blacklisted()) {
-    m_client->get_aio_finisher()->queue(ctx, -EBLACKLISTED);
+  if (m_client->is_blocklisted()) {
+    m_client->get_aio_finisher()->queue(ctx, -EBLOCKLISTED);
   } else {
     m_client->get_watch_notify()->aio_watch(m_client, m_pool_id,
                                             get_namespace(), o,
@@ -149,8 +149,8 @@ int TestIoCtxImpl::aio_unwatch(uint64_t handle, AioCompletionImpl *c) {
   m_pending_ops++;
   c->get();
   C_AioNotify *ctx = new C_AioNotify(this, c);
-  if (m_client->is_blacklisted()) {
-    m_client->get_aio_finisher()->queue(ctx, -EBLACKLISTED);
+  if (m_client->is_blocklisted()) {
+    m_client->get_aio_finisher()->queue(ctx, -EBLOCKLISTED);
   } else {
     m_client->get_watch_notify()->aio_unwatch(m_client, handle, ctx);
   }
@@ -161,8 +161,8 @@ int TestIoCtxImpl::exec(const std::string& oid, TestClassHandler *handler,
                         const char *cls, const char *method,
                         bufferlist& inbl, bufferlist* outbl,
                         uint64_t snap_id, const SnapContext &snapc) {
-  if (m_client->is_blacklisted()) {
-    return -EBLACKLISTED;
+  if (m_client->is_blocklisted()) {
+    return -EBLOCKLISTED;
   }
 
   cls_method_cxx_call_t call = handler->get_method(cls, method);
@@ -177,8 +177,8 @@ int TestIoCtxImpl::exec(const std::string& oid, TestClassHandler *handler,
 
 int TestIoCtxImpl::list_watchers(const std::string& o,
                                  std::list<obj_watch_t> *out_watchers) {
-  if (m_client->is_blacklisted()) {
-    return -EBLACKLISTED;
+  if (m_client->is_blocklisted()) {
+    return -EBLOCKLISTED;
   }
 
   return m_client->get_watch_notify()->list_watchers(m_pool_id, get_namespace(),
@@ -187,8 +187,8 @@ int TestIoCtxImpl::list_watchers(const std::string& o,
 
 int TestIoCtxImpl::notify(const std::string& o, bufferlist& bl,
                           uint64_t timeout_ms, bufferlist *pbl) {
-  if (m_client->is_blacklisted()) {
-    return -EBLACKLISTED;
+  if (m_client->is_blocklisted()) {
+    return -EBLOCKLISTED;
   }
 
   return m_client->get_watch_notify()->notify(m_client, m_pool_id,
@@ -209,7 +209,7 @@ int TestIoCtxImpl::operate(const std::string& oid,
 
   ops.get();
   m_pending_ops++;
-  m_client->add_aio_operation(oid, false, boost::bind(
+  m_client->add_aio_operation(oid, false, std::bind(
     &TestIoCtxImpl::execute_aio_operations, this, oid, &ops,
     reinterpret_cast<bufferlist*>(0), m_snap_seq, m_snapc), comp);
 
@@ -226,7 +226,7 @@ int TestIoCtxImpl::operate_read(const std::string& oid,
 
   ops.get();
   m_pending_ops++;
-  m_client->add_aio_operation(oid, false, boost::bind(
+  m_client->add_aio_operation(oid, false, std::bind(
     &TestIoCtxImpl::execute_aio_operations, this, oid, &ops, pbl,
     m_snap_seq, m_snapc), comp);
 
@@ -240,14 +240,14 @@ void TestIoCtxImpl::aio_selfmanaged_snap_create(uint64_t *snapid,
                                                 AioCompletionImpl *c) {
   m_client->add_aio_operation(
     "", true,
-    boost::bind(&TestIoCtxImpl::selfmanaged_snap_create, this, snapid), c);
+    std::bind(&TestIoCtxImpl::selfmanaged_snap_create, this, snapid), c);
 }
 
 void TestIoCtxImpl::aio_selfmanaged_snap_remove(uint64_t snapid,
                                                 AioCompletionImpl *c) {
   m_client->add_aio_operation(
     "", true,
-    boost::bind(&TestIoCtxImpl::selfmanaged_snap_remove, this, snapid), c);
+    std::bind(&TestIoCtxImpl::selfmanaged_snap_remove, this, snapid), c);
 }
 
 int TestIoCtxImpl::selfmanaged_snap_set_write_ctx(snap_t seq,
@@ -273,8 +273,8 @@ void TestIoCtxImpl::set_snap_read(snap_t seq) {
 }
 
 int TestIoCtxImpl::tmap_update(const std::string& oid, bufferlist& cmdbl) {
-  if (m_client->is_blacklisted()) {
-    return -EBLACKLISTED;
+  if (m_client->is_blocklisted()) {
+    return -EBLOCKLISTED;
   }
 
   // TODO: protect against concurrent tmap updates
@@ -330,8 +330,8 @@ int TestIoCtxImpl::tmap_update(const std::string& oid, bufferlist& cmdbl) {
 }
 
 int TestIoCtxImpl::unwatch(uint64_t handle) {
-  if (m_client->is_blacklisted()) {
-    return -EBLACKLISTED;
+  if (m_client->is_blocklisted()) {
+    return -EBLOCKLISTED;
   }
 
   return m_client->get_watch_notify()->unwatch(m_client, handle);
@@ -339,8 +339,8 @@ int TestIoCtxImpl::unwatch(uint64_t handle) {
 
 int TestIoCtxImpl::watch(const std::string& o, uint64_t *handle,
                          librados::WatchCtx *ctx, librados::WatchCtx2 *ctx2) {
-  if (m_client->is_blacklisted()) {
-    return -EBLACKLISTED;
+  if (m_client->is_blocklisted()) {
+    return -EBLOCKLISTED;
   }
 
   return m_client->get_watch_notify()->watch(m_client, m_pool_id,
@@ -351,8 +351,8 @@ int TestIoCtxImpl::watch(const std::string& o, uint64_t *handle,
 
 int TestIoCtxImpl::execute_operation(const std::string& oid,
                                      const Operation &operation) {
-  if (m_client->is_blacklisted()) {
-    return -EBLACKLISTED;
+  if (m_client->is_blocklisted()) {
+    return -EBLOCKLISTED;
   }
 
   TestRadosClient::Transaction transaction(m_client, get_namespace(), oid);
@@ -364,8 +364,8 @@ int TestIoCtxImpl::execute_aio_operations(const std::string& oid,
                                           bufferlist *pbl, uint64_t snap_id,
                                           const SnapContext &snapc) {
   int ret = 0;
-  if (m_client->is_blacklisted()) {
-    ret = -EBLACKLISTED;
+  if (m_client->is_blocklisted()) {
+    ret = -EBLOCKLISTED;
   } else {
     TestRadosClient::Transaction transaction(m_client, get_namespace(), oid);
     for (ObjectOperations::iterator it = ops->ops.begin();

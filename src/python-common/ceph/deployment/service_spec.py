@@ -1,3 +1,4 @@
+import errno
 import fnmatch
 import re
 from collections import namedtuple, OrderedDict
@@ -7,6 +8,7 @@ from typing import Optional, Dict, Any, List, Union, Callable, Iterator
 import yaml
 
 from ceph.deployment.hostspec import HostSpec
+from ceph.deployment.utils import unwrap_ipv6
 
 
 class ServiceSpecValidationError(Exception):
@@ -14,9 +16,11 @@ class ServiceSpecValidationError(Exception):
     Defining an exception here is a bit problematic, cause you cannot properly catch it,
     if it was raised in a different mgr module.
     """
-
-    def __init__(self, msg):
+    def __init__(self,
+                 msg: str,
+                 errno: int = -errno.EINVAL):
         super(ServiceSpecValidationError, self).__init__(msg)
+        self.errno = errno
 
 
 def assert_valid_host(name):
@@ -118,13 +122,16 @@ class HostPlacementSpec(namedtuple('HostPlacementSpec', ['hostname', 'network', 
         for network in networks:
             # only if we have versioned network configs
             if network.startswith('v') or network.startswith('[v'):
-                network = network.split(':')[1]
+                # if this is ipv6 we can't just simply split on ':' so do
+                # a split once and rsplit once to leave us with just ipv6 addr
+                network = network.split(':', 1)[1]
+                network = network.rsplit(':', 1)[0]
             try:
                 # if subnets are defined, also verify the validity
                 if '/' in network:
                     ip_network(network)
                 else:
-                    ip_address(network)
+                    ip_address(unwrap_ipv6(network))
             except ValueError as e:
                 # logging?
                 raise e
@@ -372,6 +379,7 @@ class ServiceSpec(object):
     """
     KNOWN_SERVICE_TYPES = 'alertmanager crash grafana iscsi mds mgr mon nfs ' \
                           'node-exporter osd prometheus rbd-mirror rgw'.split()
+    REQUIRES_SERVICE_ID = 'iscsi mds nfs osd rgw'.split()
 
     @classmethod
     def _cls(cls, service_type):
@@ -382,6 +390,7 @@ class ServiceSpec(object):
             'nfs': NFSServiceSpec,
             'osd': DriveGroupSpec,
             'iscsi': IscsiServiceSpec,
+            'alertmanager': AlertManagerSpec
         }.get(service_type, cls)
         if ret == ServiceSpec and not service_type:
             raise ServiceSpecValidationError('Spec needs a "service_type" key.')
@@ -414,7 +423,9 @@ class ServiceSpec(object):
 
         assert service_type in ServiceSpec.KNOWN_SERVICE_TYPES, service_type
         self.service_type = service_type
-        self.service_id = service_id
+        self.service_id = None
+        if self.service_type in self.REQUIRES_SERVICE_ID:
+            self.service_id = service_id
         self.unmanaged = unmanaged
         self.preview_only = preview_only
 
@@ -527,8 +538,12 @@ class ServiceSpec(object):
         if not self.service_type:
             raise ServiceSpecValidationError('Cannot add Service: type required')
 
-        if self.service_type in ['mds', 'rgw', 'nfs', 'iscsi'] and not self.service_id:
-            raise ServiceSpecValidationError('Cannot add Service: id required')
+        if self.service_type in self.REQUIRES_SERVICE_ID:
+            if not self.service_id:
+                raise ServiceSpecValidationError('Cannot add Service: id required')
+        elif self.service_id:
+            raise ServiceSpecValidationError(
+                    f'Service of type \'{self.service_type}\' should not contain a service id')
 
         if self.placement is not None:
             self.placement.validate()
@@ -588,11 +603,12 @@ class NFSServiceSpec(ServiceSpec):
 
     def rados_config_location(self):
         # type: () -> str
-        assert self.pool
-        url = 'rados://' + self.pool + '/'
-        if self.namespace:
-            url += self.namespace + '/'
-        url += self.rados_config_name()
+        url = ''
+        if self.pool:
+            url += 'rados://' + self.pool + '/'
+            if self.namespace:
+                url += self.namespace + '/'
+            url += self.rados_config_name()
         return url
 
 
@@ -727,3 +743,38 @@ class IscsiServiceSpec(ServiceSpec):
 
 
 yaml.add_representer(IscsiServiceSpec, ServiceSpec.yaml_representer)
+
+
+class AlertManagerSpec(ServiceSpec):
+    def __init__(self,
+                 service_type: str = 'alertmanager',
+                 service_id: Optional[str] = None,
+                 placement: Optional[PlacementSpec] = None,
+                 unmanaged: bool = False,
+                 preview_only: bool = False,
+                 user_data: Optional[Dict[str, Any]] = None,
+                 ):
+        assert service_type == 'alertmanager'
+        super(AlertManagerSpec, self).__init__(
+            'alertmanager', service_id=service_id,
+            placement=placement, unmanaged=unmanaged,
+            preview_only=preview_only)
+
+        # Custom configuration.
+        #
+        # Example:
+        # service_type: alertmanager
+        # service_id: xyz
+        # user_data:
+        #   default_webhook_urls:
+        #   - "https://foo"
+        #   - "https://bar"
+        #
+        # Documentation:
+        # default_webhook_urls - A list of additional URL's that are
+        #                        added to the default receivers'
+        #                        <webhook_configs> configuration.
+        self.user_data = user_data or {}
+
+
+yaml.add_representer(AlertManagerSpec, ServiceSpec.yaml_representer)

@@ -66,6 +66,8 @@ def to_format(what, format: str, many: bool, cls):
         if many:
             return yaml.dump_all(to_yaml(copy), default_flow_style=False)
         return yaml.dump(to_yaml(copy), default_flow_style=False)
+    else:
+        raise OrchestratorError(f'unsupported format type: {format}')
 
 
 def generate_preview_tables(data):
@@ -170,7 +172,7 @@ class OrchestratorCli(OrchestratorClientMixin, MgrModule,
         encoded = json.dumps({
             'ident': list(self.ident),
             'fault': list(self.fault),
-            })
+        })
         self.set_store('active_devices', encoded)
 
     def _refresh_health(self):
@@ -204,7 +206,7 @@ class OrchestratorCli(OrchestratorClientMixin, MgrModule,
             stdout=json.dumps({
                 'ident': list(self.ident),
                 'fault': list(self.fault)
-                }, indent=4, sort_keys=True))
+            }, indent=4, sort_keys=True))
 
     def light_on(self, fault_ident, devid):
         # type: (str, str) -> HandleCommandResult
@@ -276,7 +278,7 @@ class OrchestratorCli(OrchestratorClientMixin, MgrModule,
         'name=addr,type=CephString,req=false '
         'name=labels,type=CephString,n=N,req=false',
         'Add a host')
-    def _add_host(self, hostname:str, addr: Optional[str]=None, labels: Optional[List[str]]=None):
+    def _add_host(self, hostname: str, addr: Optional[str] = None, labels: Optional[List[str]] = None):
         s = HostSpec(hostname=hostname, addr=addr, labels=labels)
         completion = self.add_host(s)
         self._orchestrator_wait([completion])
@@ -348,6 +350,16 @@ class OrchestratorCli(OrchestratorClientMixin, MgrModule,
         raise_if_exception(completion)
         return HandleCommandResult(stdout=completion.result_str())
 
+    @_cli_write_command(
+        'orch host ok-to-stop',
+        'name=hostname,type=CephString',
+        desc='Check if the specified host can be safely stopped without reducing availability')
+    def _host_ok_to_stop(self, hostname: str):
+        completion = self.host_ok_to_stop(hostname)
+        self._orchestrator_wait([completion])
+        raise_if_exception(completion)
+        return HandleCommandResult(stdout=completion.result_str())
+
     @_cli_read_command(
         'orch device ls',
         "name=hostname,type=CephString,n=N,req=false "
@@ -383,7 +395,7 @@ class OrchestratorCli(OrchestratorClientMixin, MgrModule,
             table._align['SIZE'] = 'r'
             table.left_padding_width = 0
             table.right_padding_width = 2
-            for host_ in completion.result: # type: InventoryHost
+            for host_ in completion.result:  # type: InventoryHost
                 for d in host_.devices.devices:  # type: Device
                     table.add_row(
                         (
@@ -456,7 +468,7 @@ class OrchestratorCli(OrchestratorClientMixin, MgrModule,
                 ['NAME', 'RUNNING', 'REFRESHED', 'AGE',
                  'PLACEMENT',
                  'IMAGE NAME', 'IMAGE ID'
-                ],
+                 ],
                 border=False)
             table.align['NAME'] = 'l'
             table.align['RUNNING'] = 'r'
@@ -549,147 +561,6 @@ class OrchestratorCli(OrchestratorClientMixin, MgrModule,
                     ukn(s.container_id)))
 
             return HandleCommandResult(stdout=table.get_string())
-
-    def set_unmanaged_flag(self,
-                           unmanaged_flag: bool,
-                           service_type: str = 'osd',
-                           service_name=None
-                           ) -> HandleCommandResult:
-        # setting unmanaged for $service_name
-        completion = self.describe_service(service_name=service_name, service_type=service_type)
-        self._orchestrator_wait([completion])
-        raise_if_exception(completion)
-        services: List[ServiceDescription] = completion.result
-        specs = list()
-        for service in services:
-            spec = service.spec
-            spec.unmanaged = unmanaged_flag
-            specs.append(spec)
-        completion = self.apply(cast(List[GenericSpec], specs))
-        self._orchestrator_wait([completion])
-        raise_if_exception(completion)
-        if specs:
-            return HandleCommandResult(stdout=f"Changed <unmanaged> flag to <{unmanaged_flag}> for "
-                                              f"{[spec.service_name() for spec in specs]}")
-        else:
-            return HandleCommandResult(stdout=f"No specs found with the <service_name> -> {service_name}")
-
-    @_cli_write_command(
-        'orch osd spec',
-        'name=service_name,type=CephString,req=false '
-        'name=preview,type=CephBool,req=false '
-        'name=unmanaged,type=CephBool,req=false '
-        "name=format,type=CephChoices,strings=plain|json|json-pretty|yaml,req=false",
-        'Common operations on an OSDSpec. Allows previewing and changing the unmanaged flag.')
-    def _misc_osd(self,
-                  preview: bool = False,
-                  service_name: Optional[str] = None,
-                  unmanaged=None,
-                  format: Optional[str] = 'plain',
-                  ) -> HandleCommandResult:
-        usage = """
-usage:
-  ceph orch osd spec --preview
-  ceph orch osd spec --unmanaged=true|false 
-  ceph orch osd spec --service-name <service_name> --preview
-  ceph orch osd spec --service-name <service_name> --unmanaged=true|false (defaults to false)
-  
-Restrictions:
-
-    Mutexes:
-    * --preview ,--unmanaged 
-
-    Although it it's possible to set these at the same time, we will lack a proper response to each
-    action, possibly shadowing any failures.
-
-Description:
-
-    * --service-name
-        If flag is omitted, assume to target all existing OSDSpecs.
-        Needs either --unamanged or --preview.
-
-    * --unmanaged
-        Applies <unamanged> flag to targeted --service-name.
-        If --service-name is omitted, target all OSDSpecs
-        
-Examples:
-
-    # ceph orch osd spec --preview
-    
-    Queries all available OSDSpecs for previews
-    
-    # ceph orch osd spec --service-name my-osdspec-name --preview
-    
-    Queries only the specified <my-osdspec-name> for previews
-    
-    # ceph orch osd spec --unmanaged=true
-    
-    # Changes flags of all available OSDSpecs to true
-    
-    # ceph orch osd spec --service-name my-osdspec-name --unmanaged=true
-    
-    Changes the unmanaged flag of <my-osdspec-name> to true
-"""
-
-        def print_preview(previews, format_to):
-            if format != 'plain':
-                return to_format(previews, format_to, many=False, cls=None)
-            else:
-                table = PrettyTable(
-                    ['NAME', 'HOST', 'DATA', 'DB', 'WAL'],
-                    border=False)
-                table.align = 'l'
-                table.left_padding_width = 0
-                table.right_padding_width = 1
-                for host, data in previews.items():
-                    for spec in data:
-                        if spec.get('error'):
-                            return spec.get('message')
-                        dg_name = spec.get('osdspec')
-                        for osd in spec.get('data', {}).get('osds', []):
-                            db_path = '-'
-                            wal_path = '-'
-                            block_db = osd.get('block.db', {}).get('path')
-                            block_wal = osd.get('block.wal', {}).get('path')
-                            block_data = osd.get('data', {}).get('path', '')
-                            if not block_data:
-                                continue
-                            if block_db:
-                                db_path = spec.get('data', {}).get('vg', {}).get('devices', [])
-                            if block_wal:
-                                wal_path = spec.get('data', {}).get('wal_vg', {}).get('devices', [])
-                            table.add_row((dg_name, host, block_data, db_path, wal_path))
-                ret = table.get_string()
-                if not ret:
-                    ret = "No preview available"
-                return ret
-
-        if preview and (unmanaged is not None):
-            return HandleCommandResult(-errno.EINVAL, stderr=usage)
-
-        if service_name:
-            if preview:
-                completion = self.preview_osdspecs(osdspec_name=service_name)
-                self._orchestrator_wait([completion])
-                raise_if_exception(completion)
-                out = completion.result_str()
-                return HandleCommandResult(stdout=print_preview(ast.literal_eval(out), format))
-            if unmanaged is not None:
-                return self.set_unmanaged_flag(service_name=service_name, unmanaged_flag=unmanaged)
-
-            return HandleCommandResult(-errno.EINVAL, stderr=usage)
-
-        if preview:
-            completion = self.preview_osdspecs()
-            self._orchestrator_wait([completion])
-            raise_if_exception(completion)
-            out = completion.result_str()
-            return HandleCommandResult(stdout=print_preview(ast.literal_eval(out), format))
-
-        if unmanaged is not None:
-            return self.set_unmanaged_flag(unmanaged_flag=unmanaged)
-
-        return HandleCommandResult(-errno.EINVAL, stderr=usage)
 
     @_cli_write_command(
         'orch apply osd',
@@ -830,7 +701,8 @@ Usage:
             host_name, block_device = svc_arg.split(":")
             block_devices = block_device.split(',')
             devs = DeviceSelection(paths=block_devices)
-            drive_group = DriveGroupSpec(placement=PlacementSpec(host_pattern=host_name), data_devices=devs)
+            drive_group = DriveGroupSpec(placement=PlacementSpec(
+                host_pattern=host_name), data_devices=devs)
         except (TypeError, KeyError, ValueError):
             msg = "Invalid host:device spec: '{}'".format(svc_arg) + usage
             return HandleCommandResult(-errno.EINVAL, stderr=msg)
@@ -846,35 +718,53 @@ Usage:
         "name=replace,type=CephBool,req=false "
         "name=force,type=CephBool,req=false",
         'Remove OSD services')
-    def _osd_rm(self, svc_id: List[str],
-                replace: bool = False,
-                force: bool = False) -> HandleCommandResult:
-        completion = self.remove_osds(svc_id, replace, force)
+    def _osd_rm_start(self,
+                      svc_id: List[str],
+                      replace: bool = False,
+                      force: bool = False) -> HandleCommandResult:
+        completion = self.remove_osds(svc_id, replace=replace, force=force)
+        self._orchestrator_wait([completion])
+        raise_if_exception(completion)
+        return HandleCommandResult(stdout=completion.result_str())
+
+    @_cli_write_command(
+        'orch osd rm stop',
+        "name=svc_id,type=CephString,n=N",
+        'Remove OSD services')
+    def _osd_rm_stop(self, svc_id: List[str]) -> HandleCommandResult:
+        completion = self.stop_remove_osds(svc_id)
         self._orchestrator_wait([completion])
         raise_if_exception(completion)
         return HandleCommandResult(stdout=completion.result_str())
 
     @_cli_write_command(
         'orch osd rm status',
+        "name=format,type=CephChoices,strings=plain|json|json-pretty|yaml,req=false",
         desc='status of OSD removal operation')
-    def _osd_rm_status(self) -> HandleCommandResult:
+    def _osd_rm_status(self, format='plain') -> HandleCommandResult:
         completion = self.remove_osds_status()
         self._orchestrator_wait([completion])
         raise_if_exception(completion)
         report = completion.result
+
         if not report:
             return HandleCommandResult(stdout="No OSD remove/replace operations reported")
-        table = PrettyTable(
-            ['NAME', 'HOST', 'PGS', 'STARTED_AT'],
-            border=False)
-        table.align = 'l'
-        table.left_padding_width = 0
-        table.right_padding_width = 1
-        # TODO: re-add sorted and sort by pg_count
-        for osd in report:
-            table.add_row((osd.fullname, osd.nodename, osd.pg_count_str, osd.started_at))
 
-        return HandleCommandResult(stdout=table.get_string())
+        if format != 'plain':
+            out = to_format(report, format, many=True, cls=None)
+        else:
+            table = PrettyTable(
+                ['OSD_ID', 'HOST', 'STATE', 'PG_COUNT', 'REPLACE', 'FORCE', 'DRAIN_STARTED_AT'],
+                border=False)
+            table.align = 'l'
+            table.left_padding_width = 0
+            table.right_padding_width = 2
+            for osd in sorted(report, key=lambda o: o.osd_id):
+                table.add_row([osd.osd_id, osd.nodename, osd.drain_status_human(),
+                               osd.get_pg_count(), osd.replace, osd.replace, osd.drain_started_at])
+            out = table.get_string()
+
+        return HandleCommandResult(stdout=out)
 
     @_cli_write_command(
         'orch daemon add',
@@ -1060,14 +950,26 @@ Usage:
 
     @_cli_write_command(
         'orch daemon',
-        "name=action,type=CephChoices,strings=start|stop|restart|redeploy|reconfig "
+        "name=action,type=CephChoices,strings=start|stop|restart|reconfig "
         "name=name,type=CephString",
-        'Start, stop, restart, redeploy, or reconfig a specific daemon')
+        'Start, stop, restart, (redeploy,) or reconfig a specific daemon')
     def _daemon_action(self, action, name):
         if '.' not in name:
             raise OrchestratorError('%s is not a valid daemon name' % name)
-        (daemon_type, daemon_id) = name.split('.', 1)
-        completion = self.daemon_action(action, daemon_type, daemon_id)
+        completion = self.daemon_action(action, name)
+        self._orchestrator_wait([completion])
+        raise_if_exception(completion)
+        return HandleCommandResult(stdout=completion.result_str())
+
+    @_cli_write_command(
+        'orch daemon redeploy',
+        "name=name,type=CephString "
+        "name=image,type=CephString,req=false",
+        'Redeploy a daemon (with a specifc image)')
+    def _daemon_action_redeploy(self, name: str, image: Optional[str] = None) -> HandleCommandResult:
+        if '.' not in name:
+            raise OrchestratorError('%s is not a valid daemon name' % name)
+        completion = self.daemon_action("redeploy", name, image=image)
         self._orchestrator_wait([completion])
         raise_if_exception(completion)
         return HandleCommandResult(stdout=completion.result_str())
@@ -1083,7 +985,8 @@ Usage:
                 raise OrchestratorError('%s is not a valid daemon name' % name)
             (daemon_type) = name.split('.')[0]
             if not force and daemon_type in ['osd', 'mon', 'prometheus']:
-                raise OrchestratorError('must pass --force to REMOVE daemon with potentially PRECIOUS DATA for %s' % name)
+                raise OrchestratorError(
+                    'must pass --force to REMOVE daemon with potentially PRECIOUS DATA for %s' % name)
         completion = self.remove_daemons(names)
         self._orchestrator_wait([completion])
         raise_if_exception(completion)
@@ -1105,17 +1008,17 @@ Usage:
     @_cli_write_command(
         'orch apply',
         'name=service_type,type=CephChoices,strings=mon|mgr|rbd-mirror|crash|alertmanager|grafana|node-exporter|prometheus,req=false '
-        'name=dry_run,type=CephBool,req=false '
         'name=placement,type=CephString,req=false '
+        'name=dry_run,type=CephBool,req=false '
         'name=format,type=CephChoices,strings=plain|json|json-pretty|yaml,req=false '
         'name=unmanaged,type=CephBool,req=false',
         'Update the size or placement for a service or apply a large yaml spec')
     def _apply_misc(self,
                     service_type: Optional[str] = None,
                     placement: Optional[str] = None,
-                    unmanaged: bool = False,
                     dry_run: bool = False,
                     format: str = 'plain',
+                    unmanaged: bool = False,
                     inbuf: Optional[str] = None) -> HandleCommandResult:
         usage = """Usage:
   ceph orch apply -i <yaml spec> [--dry-run]
@@ -1134,7 +1037,8 @@ Usage:
         else:
             placementspec = PlacementSpec.from_string(placement)
             assert service_type
-            specs = [ServiceSpec(service_type, placement=placementspec, unmanaged=unmanaged, preview_only=dry_run)]
+            specs = [ServiceSpec(service_type, placement=placementspec,
+                                 unmanaged=unmanaged, preview_only=dry_run)]
 
         completion = self.apply(specs)
         self._orchestrator_wait([completion])
@@ -1154,8 +1058,8 @@ Usage:
     @_cli_write_command(
         'orch apply mds',
         'name=fs_name,type=CephString '
-        'name=dry_run,type=CephBool,req=false '
         'name=placement,type=CephString,req=false '
+        'name=dry_run,type=CephBool,req=false '
         'name=unmanaged,type=CephBool,req=false '
         'name=format,type=CephChoices,strings=plain|json|json-pretty|yaml,req=false',
         'Update the number of MDS instances for the given fs_name')
@@ -1163,8 +1067,8 @@ Usage:
                    fs_name: str,
                    placement: Optional[str] = None,
                    dry_run: bool = False,
-                   format: str = 'plain',
                    unmanaged: bool = False,
+                   format: str = 'plain',
                    inbuf: Optional[str] = None) -> HandleCommandResult:
         if inbuf:
             raise OrchestratorValidationError('unrecognized command -i; -h or --help for usage')
@@ -1181,10 +1085,10 @@ Usage:
         raise_if_exception(completion)
         out = completion.result_str()
         if dry_run:
-            completion = self.plan([spec])
-            self._orchestrator_wait([completion])
-            raise_if_exception(completion)
-            data = completion.result
+            completion_plan = self.plan([spec])
+            self._orchestrator_wait([completion_plan])
+            raise_if_exception(completion_plan)
+            data = completion_plan.result
             if format == 'plain':
                 out = preview_table_services(data)
             else:
@@ -1200,7 +1104,7 @@ Usage:
         'name=ssl,type=CephBool,req=false '
         'name=placement,type=CephString,req=false '
         'name=dry_run,type=CephBool,req=false '
-        'name=format,type=CephChoices,strings=plain|json|json-pretty|yaml,req=false ' 
+        'name=format,type=CephChoices,strings=plain|json|json-pretty|yaml,req=false '
         'name=unmanaged,type=CephBool,req=false',
         'Update the number of RGW instances for the given zone')
     def _apply_rgw(self,
@@ -1233,10 +1137,10 @@ Usage:
         raise_if_exception(completion)
         out = completion.result_str()
         if dry_run:
-            completion = self.plan([spec])
-            self._orchestrator_wait([completion])
-            raise_if_exception(completion)
-            data = completion.result
+            completion_plan = self.plan([spec])
+            self._orchestrator_wait([completion_plan])
+            raise_if_exception(completion_plan)
+            data = completion_plan.result
             if format == 'plain':
                 out = preview_table_services(data)
             else:
@@ -1250,7 +1154,7 @@ Usage:
         'name=namespace,type=CephString,req=false '
         'name=placement,type=CephString,req=false '
         'name=dry_run,type=CephBool,req=false '
-        'name=format,type=CephChoices,strings=plain|json|json-pretty|yaml,req=false ' 
+        'name=format,type=CephChoices,strings=plain|json|json-pretty|yaml,req=false '
         'name=unmanaged,type=CephBool,req=false',
         'Scale an NFS service')
     def _apply_nfs(self,
@@ -1279,10 +1183,10 @@ Usage:
         raise_if_exception(completion)
         out = completion.result_str()
         if dry_run:
-            completion = self.plan([spec])
-            self._orchestrator_wait([completion])
-            raise_if_exception(completion)
-            data = completion.result
+            completion_plan = self.plan([spec])
+            self._orchestrator_wait([completion_plan])
+            raise_if_exception(completion_plan)
+            data = completion_plan.result
             if format == 'plain':
                 out = preview_table_services(data)
             else:
@@ -1297,7 +1201,7 @@ Usage:
         'name=trusted_ip_list,type=CephString,req=false '
         'name=placement,type=CephString,req=false '
         'name=dry_run,type=CephBool,req=false '
-        'name=format,type=CephChoices,strings=plain|json|json-pretty|yaml,req=false ' 
+        'name=format,type=CephChoices,strings=plain|json|json-pretty|yaml,req=false '
         'name=unmanaged,type=CephBool,req=false',
         'Scale an iSCSI service')
     def _apply_iscsi(self,
@@ -1329,10 +1233,10 @@ Usage:
         raise_if_exception(completion)
         out = completion.result_str()
         if dry_run:
-            completion = self.plan([spec])
-            self._orchestrator_wait([completion])
-            raise_if_exception(completion)
-            data = completion.result
+            completion_plan = self.plan([spec])
+            self._orchestrator_wait([completion_plan])
+            raise_if_exception(completion_plan)
+            data = completion_plan.result
             if format == 'plain':
                 out = preview_table_services(data)
             else:
@@ -1474,8 +1378,8 @@ Usage:
         """
         if image and re.match(r'^v?\d+\.\d+\.\d+$', image) and ceph_version is None:
             ver = image[1:] if image.startswith('v') else image
-            s =  f"Error: unable to pull image name `{image}`.\n" \
-                 f"  Maybe you meant `--ceph-version {ver}`?"
+            s = f"Error: unable to pull image name `{image}`.\n" \
+                f"  Maybe you meant `--ceph-version {ver}`?"
             raise OrchestratorValidationError(s)
 
     @_cli_write_command(

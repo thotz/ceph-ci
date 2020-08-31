@@ -191,7 +191,7 @@ class DriveGroupSpec(ServiceSpec):
         #: Set (or override) the "bluestore_block_db_size" value, in bytes
         self.block_db_size = block_db_size
 
-        #: set journal_size is bytes
+        #: set journal_size in bytes
         self.journal_size = journal_size
 
         #: Number of osd daemons per "DATA" device.
@@ -294,6 +294,8 @@ class DriveGroupSpec(ServiceSpec):
         for s in filter(None, specs):
             s.validate()
         for s in filter(None, [self.db_devices, self.wal_devices, self.journal_devices]):
+            if s.paths:
+                raise DriveGroupValidationError("`paths` is only allowed for data_devices")
             if s.all:
                 raise DriveGroupValidationError("`all` is only allowed for data_devices")
 

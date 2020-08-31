@@ -6,9 +6,17 @@ import { RouterTestingModule } from '@angular/router/testing';
 import { ToastrModule } from 'ngx-toastr';
 import { of } from 'rxjs';
 
-import { configureTestBed } from '../../../../testing/unit-test-helper';
+import {
+  configureTestBed,
+  OrchestratorHelper,
+  TableActionHelper
+} from '../../../../testing/unit-test-helper';
 import { CoreModule } from '../../../core/core.module';
 import { HostService } from '../../../shared/api/host.service';
+import { OrchestratorService } from '../../../shared/api/orchestrator.service';
+import { TableActionsComponent } from '../../../shared/datatable/table-actions/table-actions.component';
+import { CdTableSelection } from '../../../shared/models/cd-table-selection';
+import { OrchestratorFeature } from '../../../shared/models/orchestrator.enum';
 import { Permissions } from '../../../shared/models/permissions';
 import { AuthStorageService } from '../../../shared/services/auth-storage.service';
 import { SharedModule } from '../../../shared/shared.module';
@@ -20,6 +28,7 @@ describe('HostsComponent', () => {
   let component: HostsComponent;
   let fixture: ComponentFixture<HostsComponent>;
   let hostListSpy: jasmine.Spy;
+  let orchService: OrchestratorService;
 
   const fakeAuthStorageService = {
     getPermissions: () => {
@@ -38,14 +47,17 @@ describe('HostsComponent', () => {
       CephModule,
       CoreModule
     ],
-    providers: [{ provide: AuthStorageService, useValue: fakeAuthStorageService }]
+    providers: [
+      { provide: AuthStorageService, useValue: fakeAuthStorageService },
+      TableActionsComponent
+    ]
   });
 
   beforeEach(() => {
     fixture = TestBed.createComponent(HostsComponent);
     component = fixture.componentInstance;
     hostListSpy = spyOn(TestBed.inject(HostService), 'list');
-    fixture.detectChanges();
+    orchService = TestBed.inject(OrchestratorService);
   });
 
   it('should create', () => {
@@ -76,7 +88,9 @@ describe('HostsComponent', () => {
       }
     ];
 
+    OrchestratorHelper.mockStatus(true);
     hostListSpy.and.callFake(() => of(payload));
+    fixture.detectChanges();
 
     return fixture.whenStable().then(() => {
       fixture.detectChanges();
@@ -88,71 +102,135 @@ describe('HostsComponent', () => {
     });
   });
 
-  describe('getEditDisableDesc', () => {
-    it('should return message (not managed by Orchestrator)', () => {
-      component.selection.add({
-        sources: {
-          ceph: true,
-          orchestrator: false
-        }
-      });
-      expect(component.getEditDisableDesc(component.selection)).toBe(
-        'Host editing is disabled because the selected host is not managed by Orchestrator.'
-      );
+  describe('table actions', () => {
+    const fakeHosts = require('./fixtures/host_list_response.json');
+
+    beforeEach(() => {
+      hostListSpy.and.callFake(() => of(fakeHosts));
     });
 
-    it('should return undefined (no selection)', () => {
-      expect(component.getEditDisableDesc(component.selection)).toBeUndefined();
+    const testTableActions = async (
+      orch: boolean,
+      features: OrchestratorFeature[],
+      tests: { selectRow?: number; expectResults: any }[]
+    ) => {
+      OrchestratorHelper.mockStatus(orch, features);
+      fixture.detectChanges();
+      await fixture.whenStable();
+
+      for (const test of tests) {
+        if (test.selectRow) {
+          component.selection = new CdTableSelection();
+          component.selection.selected = [test.selectRow];
+        }
+        await TableActionHelper.verifyTableActions(
+          fixture,
+          component.tableActions,
+          test.expectResults
+        );
+      }
+    };
+
+    it('should have correct states when Orchestrator is enabled', async () => {
+      const tests = [
+        {
+          expectResults: {
+            Create: { disabled: false, disableDesc: '' },
+            Edit: { disabled: true, disableDesc: '' },
+            Delete: { disabled: true, disableDesc: '' }
+          }
+        },
+        {
+          selectRow: fakeHosts[0], // non-orchestrator host
+          expectResults: {
+            Create: { disabled: false, disableDesc: '' },
+            Edit: { disabled: true, disableDesc: component.messages.nonOrchHost },
+            Delete: { disabled: true, disableDesc: component.messages.nonOrchHost }
+          }
+        },
+        {
+          selectRow: fakeHosts[1], // orchestrator host
+          expectResults: {
+            Create: { disabled: false, disableDesc: '' },
+            Edit: { disabled: false, disableDesc: '' },
+            Delete: { disabled: false, disableDesc: '' }
+          }
+        }
+      ];
+
+      const features = [
+        OrchestratorFeature.HOST_CREATE,
+        OrchestratorFeature.HOST_LABEL_ADD,
+        OrchestratorFeature.HOST_DELETE,
+        OrchestratorFeature.HOST_LABEL_REMOVE
+      ];
+      await testTableActions(true, features, tests);
     });
 
-    it('should return undefined (managed by Orchestrator)', () => {
-      component.selection.add({
-        sources: {
-          ceph: false,
-          orchestrator: true
+    it('should have correct states when Orchestrator is disabled', async () => {
+      const resultNoOrchestrator = {
+        disabled: true,
+        disableDesc: orchService.disableMessages.noOrchestrator
+      };
+      const tests = [
+        {
+          expectResults: {
+            Create: resultNoOrchestrator,
+            Edit: { disabled: true, disableDesc: '' },
+            Delete: { disabled: true, disableDesc: '' }
+          }
+        },
+        {
+          selectRow: fakeHosts[0], // non-orchestrator host
+          expectResults: {
+            Create: resultNoOrchestrator,
+            Edit: { disabled: true, disableDesc: component.messages.nonOrchHost },
+            Delete: { disabled: true, disableDesc: component.messages.nonOrchHost }
+          }
+        },
+        {
+          selectRow: fakeHosts[1], // orchestrator host
+          expectResults: {
+            Create: resultNoOrchestrator,
+            Edit: resultNoOrchestrator,
+            Delete: resultNoOrchestrator
+          }
         }
-      });
-      expect(component.getEditDisableDesc(component.selection)).toBeUndefined();
+      ];
+      await testTableActions(false, [], tests);
     });
-  });
 
-  describe('getDeleteDisableDesc', () => {
-    it('should return message (not managed by Orchestrator)', () => {
-      component.selection.add({
-        sources: {
-          ceph: false,
-          orchestrator: true
+    it('should have correct states when Orchestrator features are missing', async () => {
+      const resultMissingFeatures = {
+        disabled: true,
+        disableDesc: orchService.disableMessages.missingFeature
+      };
+      const tests = [
+        {
+          expectResults: {
+            Create: resultMissingFeatures,
+            Edit: { disabled: true, disableDesc: '' },
+            Delete: { disabled: true, disableDesc: '' }
+          }
+        },
+        {
+          selectRow: fakeHosts[0], // non-orchestrator host
+          expectResults: {
+            Create: resultMissingFeatures,
+            Edit: { disabled: true, disableDesc: component.messages.nonOrchHost },
+            Delete: { disabled: true, disableDesc: component.messages.nonOrchHost }
+          }
+        },
+        {
+          selectRow: fakeHosts[1], // orchestrator host
+          expectResults: {
+            Create: resultMissingFeatures,
+            Edit: resultMissingFeatures,
+            Delete: resultMissingFeatures
+          }
         }
-      });
-      component.selection.add({
-        sources: {
-          ceph: true,
-          orchestrator: false
-        }
-      });
-      expect(component.getDeleteDisableDesc(component.selection)).toBe(
-        'Host deletion is disabled because a selected host is not managed by Orchestrator.'
-      );
-    });
-
-    it('should return undefined (no selection)', () => {
-      expect(component.getDeleteDisableDesc(component.selection)).toBeUndefined();
-    });
-
-    it('should return undefined (managed by Orchestrator)', () => {
-      component.selection.add({
-        sources: {
-          ceph: false,
-          orchestrator: true
-        }
-      });
-      component.selection.add({
-        sources: {
-          ceph: false,
-          orchestrator: true
-        }
-      });
-      expect(component.getDeleteDisableDesc(component.selection)).toBeUndefined();
+      ];
+      await testTableActions(true, [], tests);
     });
   });
 });

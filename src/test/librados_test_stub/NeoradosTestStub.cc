@@ -6,6 +6,7 @@
 #include "common/ceph_mutex.h"
 #include "common/hobject.h"
 #include "librados/AioCompletionImpl.h"
+#include "mon/error_code.h"
 #include "osd/error_code.h"
 #include "osd/osd_types.h"
 #include "osdc/error_code.h"
@@ -17,10 +18,11 @@
 #include <memory>
 #include <optional>
 #include <string>
-#include <boost/bind.hpp>
+#include <functional>
 #include <boost/system/system_error.hpp>
 
 namespace bs = boost::system;
+using namespace std::placeholders;
 
 namespace neorados {
 namespace detail {
@@ -237,17 +239,23 @@ Op::~Op() {
 
 void Op::assert_exists() {
   auto o = *reinterpret_cast<librados::TestObjectOperationImpl**>(&impl);
-  o->ops.push_back(boost::bind(
+  o->ops.push_back(std::bind(
     &librados::TestIoCtxImpl::assert_exists, _1, _2, _4));
+}
+
+void Op::assert_version(uint64_t ver) {
+  auto o = *reinterpret_cast<librados::TestObjectOperationImpl**>(&impl);
+  o->ops.push_back(std::bind(
+          &librados::TestIoCtxImpl::assert_version, _1, _2, ver));
 }
 
 void Op::cmpext(uint64_t off, ceph::buffer::list&& cmp_bl, std::size_t* s) {
   auto o = *reinterpret_cast<librados::TestObjectOperationImpl**>(&impl);
-  librados::ObjectOperationTestImpl op = boost::bind(
+  librados::ObjectOperationTestImpl op = std::bind(
     &librados::TestIoCtxImpl::cmpext, _1, _2, off, cmp_bl, _4);
   if (s != nullptr) {
-    op = boost::bind(
-      save_operation_size, boost::bind(op, _1, _2, _3, _4, _5), s);
+    op = std::bind(
+      save_operation_size, std::bind(op, _1, _2, _3, _4, _5), s);
   }
   o->ops.push_back(op);
 }
@@ -302,8 +310,8 @@ void Op::exec(std::string_view cls, std::string_view method,
         (out != nullptr ? out : outbl), snap_id, snapc);
     };
   if (ec != nullptr) {
-    op = boost::bind(
-      save_operation_ec, boost::bind(op, _1, _2, _3, _4, _5), ec);
+    op = std::bind(
+      save_operation_ec, std::bind(op, _1, _2, _3, _4, _5), ec);
   }
   o->ops.push_back(op);
 }
@@ -323,8 +331,8 @@ void Op::exec(std::string_view cls, std::string_view method,
         std::string(method).c_str(), inbl, outbl, snap_id, snapc);
     };
   if (ec != NULL) {
-    op = boost::bind(
-      save_operation_ec, boost::bind(op, _1, _2, _3, _4, _5), ec);
+    op = std::bind(
+      save_operation_ec, std::bind(op, _1, _2, _3, _4, _5), ec);
   }
   o->ops.push_back(op);
 }
@@ -334,14 +342,14 @@ void ReadOp::read(size_t off, uint64_t len, ceph::buffer::list* out,
   auto o = *reinterpret_cast<librados::TestObjectOperationImpl**>(&impl);
   librados::ObjectOperationTestImpl op;
   if (out != nullptr) {
-    op = boost::bind(&librados::TestIoCtxImpl::read, _1, _2, len, off, out, _4);
+    op = std::bind(&librados::TestIoCtxImpl::read, _1, _2, len, off, out, _4);
   } else {
-    op = boost::bind(&librados::TestIoCtxImpl::read, _1, _2, len, off, _3, _4);
+    op = std::bind(&librados::TestIoCtxImpl::read, _1, _2, len, off, _3, _4);
   }
 
   if (ec != NULL) {
-    op = boost::bind(
-      save_operation_ec, boost::bind(op, _1, _2, _3, _4, _5), ec);
+    op = std::bind(
+      save_operation_ec, std::bind(op, _1, _2, _3, _4, _5), ec);
   }
   o->ops.push_back(op);
 }
@@ -366,52 +374,52 @@ void ReadOp::sparse_read(uint64_t off, uint64_t len,
       return r;
     };
   if (ec != NULL) {
-    op = boost::bind(save_operation_ec,
-                     boost::bind(op, _1, _2, _3, _4, _5), ec);
+    op = std::bind(save_operation_ec,
+                     std::bind(op, _1, _2, _3, _4, _5), ec);
   }
   o->ops.push_back(op);
 }
 
 void WriteOp::create(bool exclusive) {
   auto o = *reinterpret_cast<librados::TestObjectOperationImpl**>(&impl);
-  o->ops.push_back(boost::bind(
+  o->ops.push_back(std::bind(
     &librados::TestIoCtxImpl::create, _1, _2, exclusive, _5));
 }
 
 void WriteOp::write(uint64_t off, ceph::buffer::list&& bl) {
   auto o = *reinterpret_cast<librados::TestObjectOperationImpl**>(&impl);
-  o->ops.push_back(boost::bind(
+  o->ops.push_back(std::bind(
     &librados::TestIoCtxImpl::write, _1, _2, bl, bl.length(), off, _5));
 }
 
 void WriteOp::write_full(ceph::buffer::list&& bl) {
   auto o = *reinterpret_cast<librados::TestObjectOperationImpl**>(&impl);
-  o->ops.push_back(boost::bind(
+  o->ops.push_back(std::bind(
     &librados::TestIoCtxImpl::write_full, _1, _2, bl, _5));
 }
 
 void WriteOp::remove() {
   auto o = *reinterpret_cast<librados::TestObjectOperationImpl**>(&impl);
-  o->ops.push_back(boost::bind(
+  o->ops.push_back(std::bind(
     &librados::TestIoCtxImpl::remove, _1, _2, _5));
 }
 
 void WriteOp::truncate(uint64_t off) {
   auto o = *reinterpret_cast<librados::TestObjectOperationImpl**>(&impl);
-  o->ops.push_back(boost::bind(
+  o->ops.push_back(std::bind(
     &librados::TestIoCtxImpl::truncate, _1, _2, off, _5));
 }
 
 void WriteOp::zero(uint64_t off, uint64_t len) {
   auto o = *reinterpret_cast<librados::TestObjectOperationImpl**>(&impl);
-  o->ops.push_back(boost::bind(
+  o->ops.push_back(std::bind(
     &librados::TestIoCtxImpl::zero, _1, _2, off, len, _5));
 }
 
 void WriteOp::writesame(std::uint64_t off, std::uint64_t write_len,
                         ceph::buffer::list&& bl) {
   auto o = *reinterpret_cast<librados::TestObjectOperationImpl**>(&impl);
-  o->ops.push_back(boost::bind(
+  o->ops.push_back(std::bind(
     &librados::TestIoCtxImpl::writesame, _1, _2, bl, write_len, off, _5));
 }
 
@@ -502,6 +510,15 @@ void RADOS::mon_command(std::vector<std::string> command,
   auto r = impl->test_rados_client->mon_command(command, bl, outbl, outs);
   c->post(std::move(c),
           (r < 0 ? bs::error_code(-r, osd_category()) : bs::error_code()));
+}
+
+void RADOS::blocklist_add(std::string_view client_address,
+                          std::optional<std::chrono::seconds> expire,
+                          std::unique_ptr<SimpleOpComp> c) {
+  auto r = impl->test_rados_client->blocklist_add(
+    std::string(client_address), expire.value_or(0s).count());
+  c->post(std::move(c),
+          (r < 0 ? bs::error_code(-r, mon_category()) : bs::error_code()));
 }
 
 void RADOS::wait_for_latest_osd_map(std::unique_ptr<Op::Completion> c) {

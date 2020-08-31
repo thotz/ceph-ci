@@ -2,8 +2,6 @@ import { Component, Input, OnChanges, OnInit } from '@angular/core';
 import { DomSanitizer, SafeUrl } from '@angular/platform-browser';
 
 import { Icons } from '../../../shared/enum/icons.enum';
-import { CephReleaseNamePipe } from '../../../shared/pipes/ceph-release-name.pipe';
-import { SummaryService } from '../../../shared/services/summary.service';
 import { SettingsService } from '../../api/settings.service';
 
 @Component({
@@ -36,14 +34,7 @@ export class GrafanaComponent implements OnInit, OnChanges {
   @Input()
   uid: string;
 
-  docsUrl: string;
-
-  constructor(
-    private summaryService: SummaryService,
-    private sanitizer: DomSanitizer,
-    private settingsService: SettingsService,
-    private cephReleaseNamePipe: CephReleaseNamePipe
-  ) {
+  constructor(private sanitizer: DomSanitizer, private settingsService: SettingsService) {
     this.grafanaTimes = [
       {
         name: $localize`Last 5 minutes`,
@@ -82,10 +73,6 @@ export class GrafanaComponent implements OnInit, OnChanges {
         value: 'from=now-1d%2Fd&to=now-1d%2Fd'
       },
       {
-        name: $localize`Today`,
-        value: 'from=now%2Fd&to=now%2Fd'
-      },
-      {
         name: $localize`Today so far`,
         value: 'from=now%2Fd&to=now'
       },
@@ -106,10 +93,6 @@ export class GrafanaComponent implements OnInit, OnChanges {
         value: 'from=now-1w%2Fw&to=now-1w%2Fw'
       },
       {
-        name: $localize`This week`,
-        value: 'from=now%2Fw&to=now%2Fw'
-      },
-      {
         name: $localize`This week so far`,
         value: 'from=now%2Fw&to=now'
       },
@@ -120,10 +103,6 @@ export class GrafanaComponent implements OnInit, OnChanges {
       {
         name: $localize`Previous month`,
         value: 'from=now-1M%2FM&to=now-1M%2FM'
-      },
-      {
-        name: $localize`This month`,
-        value: 'from=now%2FM&to=now%2FM'
       },
       {
         name: $localize`This month so far`,
@@ -150,10 +129,6 @@ export class GrafanaComponent implements OnInit, OnChanges {
         value: 'from=now-1y%2Fy&to=now-1y%2Fy'
       },
       {
-        name: $localize`This year`,
-        value: 'from=now%2Fy&to=now%2Fy'
-      },
-      {
         name: $localize`This year so far`,
         value: 'from=now%2Fy&to=now'
       },
@@ -175,13 +150,6 @@ export class GrafanaComponent implements OnInit, OnChanges {
       two: 'grafana_two',
       three: 'grafana_three'
     };
-
-    this.summaryService.subscribeOnce((summary) => {
-      const releaseName = this.cephReleaseNamePipe.transform(summary.version);
-      this.docsUrl =
-        `http://docs.ceph.com/docs/${releaseName}/mgr/dashboard/` +
-        `#enabling-the-embedding-of-grafana-dashboards`;
-    });
 
     this.settingsService.ifSettingConfigured('api/grafana/url', (url) => {
       this.grafanaExist = true;

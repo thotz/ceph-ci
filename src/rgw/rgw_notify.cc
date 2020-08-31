@@ -28,7 +28,7 @@ void populate_record_from_request(const req_state *s,
   // configurationId is filled from notification configuration
   record.bucket_name = s->bucket_name;
   record.bucket_ownerIdentity = s->bucket_owner.get_id().id;
-  record.bucket_arn = to_string(rgw::ARN(s->bucket->get_bi()));
+  record.bucket_arn = to_string(rgw::ARN(s->bucket->get_key()));
   record.object_key = obj->get_name();
   record.object_size = obj->get_obj_size();
   record.object_etag = etag;
@@ -46,11 +46,11 @@ void populate_record_from_request(const req_state *s,
   // opaque data will be filled from topic configuration
 }
 
-bool match(const rgw_pubsub_topic_filter& filter, const req_state* s, EventType event) {
+bool match(const rgw_pubsub_topic_filter& filter, const req_state* s, const rgw::sal::RGWObject* obj, EventType event) {
   if (!::match(filter.events, event)) { 
     return false;
   }
-  if (!::match(filter.s3_filter.key_filter, s->object->get_name())) {
+  if (!::match(filter.s3_filter.key_filter, obj->get_name())) {
     return false;
   }
   if (!::match(filter.s3_filter.metadata_filter, s->info.x_meta_map)) {
@@ -69,7 +69,7 @@ int publish(const req_state* s,
         EventType event_type,
         rgw::sal::RGWRadosStore* store) {
     RGWUserPubSub ps_user(store, s->user->get_id());
-    RGWUserPubSub::Bucket ps_bucket(&ps_user, s->bucket->get_bi());
+    RGWUserPubSub::Bucket ps_bucket(&ps_user, s->bucket->get_key());
     rgw_pubsub_bucket_topics bucket_topics;
     auto rc = ps_bucket.get_topics(&bucket_topics);
     if (rc < 0) {
@@ -83,7 +83,7 @@ int publish(const req_state* s,
     for (const auto& bucket_topic : bucket_topics.topics) {
         const rgw_pubsub_topic_filter& topic_filter = bucket_topic.second;
         const rgw_pubsub_topic& topic_cfg = topic_filter.topic;
-        if (!match(topic_filter, s, event_type)) {
+        if (!match(topic_filter, s, obj, event_type)) {
             // topic does not apply to req_state
             continue;
         }

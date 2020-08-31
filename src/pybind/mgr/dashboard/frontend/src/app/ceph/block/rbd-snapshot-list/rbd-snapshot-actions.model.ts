@@ -1,5 +1,3 @@
-import * as _ from 'lodash';
-
 import { ActionLabelsI18n } from '../../../shared/constants/app.constants';
 import { Icons } from '../../../shared/enum/icons.enum';
 import { CdTableAction } from '../../../shared/models/cd-table-action';
@@ -44,11 +42,7 @@ export class RbdSnapshotActionsModel {
     this.clone = {
       permission: 'create',
       canBePrimary: (selection: CdTableSelection) => selection.hasSingleSelection,
-      disable: (selection: CdTableSelection) =>
-        !selection.hasSingleSelection ||
-        selection.first().cdExecuting ||
-        !_.isUndefined(this.getCloneDisableDesc(featuresName)),
-      disableDesc: () => this.getCloneDisableDesc(featuresName),
+      disable: (selection: CdTableSelection) => this.getCloneDisableDesc(selection, featuresName),
       icon: Icons.clone,
       name: actionLabels.CLONE
     };
@@ -87,11 +81,15 @@ export class RbdSnapshotActionsModel {
     ];
   }
 
-  getCloneDisableDesc(featuresName: string[]): string | undefined {
-    if (!featuresName?.includes('layering')) {
-      return $localize`Parent image must support Layering`;
+  getCloneDisableDesc(selection: CdTableSelection, featuresName: string[]): boolean | string {
+    if (selection.hasSingleSelection && !selection.first().cdExecuting) {
+      if (!featuresName?.includes('layering')) {
+        return $localize`Parent image must support Layering`;
+      }
+
+      return false;
     }
 
-    return undefined;
+    return true;
   }
 }

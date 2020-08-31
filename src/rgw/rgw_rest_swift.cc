@@ -858,7 +858,7 @@ int RGWPutObj_ObjStore_SWIFT::update_slo_segment_size(rgw_slo_entry& entry) {
     }
     bucket = bucket_info.bucket;
   } else {
-    bucket = s->bucket->get_bi();
+    bucket = s->bucket->get_key();
   }
 
   /* fetch the stored size of the seg (or error if not valid) */
@@ -1553,8 +1553,8 @@ int RGWGetObj_ObjStore_SWIFT::send_response_data(bufferlist& bl,
       }
     }
 
-    get_contype_from_attrs(attrs, content_type);
-    dump_object_metadata(this, s, attrs);
+    get_contype_from_attrs(attrs.attrs, content_type);
+    dump_object_metadata(this, s, attrs.attrs);
   }
 
   end_header(s, this, !content_type.empty() ? content_type.c_str()
@@ -2385,6 +2385,11 @@ int RGWSwiftWebsiteHandler::serve_errordoc(const int http_ret,
 int RGWSwiftWebsiteHandler::error_handler(const int err_no,
                                           std::string* const error_content)
 {
+  if (!s->bucket.get()) {
+    /* No bucket, default no-op handler */
+    return err_no;
+  }
+
   const auto& ws_conf = s->bucket->get_info().website_conf;
 
   if (can_be_website_req() && ! ws_conf.error_doc.empty()) {

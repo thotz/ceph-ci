@@ -147,6 +147,7 @@ librados::IoCtx duplicate_io_ctx(librados::IoCtx& io_ctx) {
   }
 
   ImageCtx::~ImageCtx() {
+    ceph_assert(config_watcher == nullptr);
     ceph_assert(image_watcher == NULL);
     ceph_assert(exclusive_lock == NULL);
     ceph_assert(object_map == NULL);
@@ -172,11 +173,6 @@ librados::IoCtx duplicate_io_ctx(librados::IoCtx& io_ctx) {
     delete state;
 
     delete plugin_registry;
-
-    // destroy our AsioEngine via its shared io_context to ensure that we
-    // aren't executing within an AsioEngine-owned strand
-    auto& io_context = asio_engine->get_io_context();
-    boost::asio::post(io_context, [asio_engine=std::move(asio_engine)]() {});
   }
 
   void ImageCtx::init() {
@@ -724,6 +720,8 @@ librados::IoCtx duplicate_io_ctx(librados::IoCtx& io_ctx) {
                                 bool thread_safe) {
     ldout(cct, 20) << __func__ << dendl;
 
+    std::unique_lock image_locker(image_lock);
+
     // reset settings back to global defaults
     for (auto& key : config_overrides) {
       std::string value;
@@ -761,6 +759,8 @@ librados::IoCtx duplicate_io_ctx(librados::IoCtx& io_ctx) {
         }
       }
     }
+
+    image_locker.unlock();
 
 #define ASSIGN_OPTION(param, type)              \
     param = config.get_val<type>("rbd_"#param)
