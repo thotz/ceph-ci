@@ -96,6 +96,7 @@ class Schedule(object):
                  created_count=0,
                  pruned_count=0,
                  active=True,
+                 allow_minute_snaps=False
                  ):
         self.fs = fs_name
         self.subvol = subvol
@@ -130,6 +131,7 @@ class Schedule(object):
         self.created_count = created_count
         self.pruned_count = pruned_count
         self.active = bool(active)
+        self.allow_minute_snaps = bool(allow_minute_snaps)
 
     @classmethod
     def _from_db_row(cls, table_row, fs):
@@ -146,7 +148,8 @@ class Schedule(object):
                    table_row['last_pruned'],
                    table_row['created_count'],
                    table_row['pruned_count'],
-                   table_row['active'])
+                   table_row['active'],
+                   table_row['allow_minute_snaps'])
 
     def __str__(self):
         return f'''{self.path} {self.schedule} {dump_retention(self.retention)}'''
@@ -175,6 +178,7 @@ class Schedule(object):
         created_count INT DEFAULT 0,
         pruned_count INT DEFAULT 0,
         active INT NOT NULL,
+        allow_minute_snaps INT NOT NULL,
         FOREIGN KEY(schedule_id) REFERENCES schedules(id) ON DELETE CASCADE,
         UNIQUE (schedule_id, start, repeat)
     );'''
@@ -195,7 +199,7 @@ class Schedule(object):
     PROTO_GET_SCHEDULES = '''SELECT
           s.path, s.subvol, s.rel_path, sm.active,
           sm.schedule, s.retention, sm.start, sm.first, sm.last,
-          sm.last_pruned, sm.created, sm.created_count, sm.pruned_count
+          sm.last_pruned, sm.created, sm.created_count, sm.pruned_count, sm.allow_minute_snaps
           FROM schedules s
               INNER JOIN schedules_meta sm ON sm.schedule_id = s.id
           WHERE'''
@@ -238,8 +242,8 @@ class Schedule(object):
         Values(?, ?, ?, ?);'''
     INSERT_SCHEDULE_META = '''INSERT INTO
         schedules_meta(schedule_id, start, created, repeat, schedule,
-        active)
-        SELECT ?, ?, ?, ?, ?, ?'''
+        active, allow_minute_snaps)
+        SELECT ?, ?, ?, ?, ?, ?, ?'''
 
     def store_schedule(self, db):
         sched_id = None
@@ -265,7 +269,7 @@ class Schedule(object):
                         self.created.strftime(SNAP_DB_TS_FORMAT),
                         self.repeat,
                         self.schedule,
-                        1))
+                        1, 1 if self.allow_minute_snaps else 0))
 
     @classmethod
     def rm_schedule(cls, db, path, repeat, start):
@@ -359,7 +363,7 @@ class Schedule(object):
     def repeat(self):
         mult = self.schedule[-1]
         period = int(self.schedule[0:-1])
-        if mult == 'M':
+        if self.allow_minute_snaps and mult == 'M':
             return period * 60
         elif mult == 'h':
             return period * 60 * 60
