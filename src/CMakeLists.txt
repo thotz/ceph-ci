@@ -305,6 +305,16 @@ else()
   include_directories(SYSTEM "${CMAKE_SOURCE_DIR}/src/fmt/include")
 endif()
 
+# in osd/PeeringState.h, the number of elements in PeeringState::Active::reactions
+# is now 21 which exceeds the default value of BOOST_MPL_LIMIT_VECTOR_SIZE, which
+# is 20. so we need to override it. see
+# https://www.boost.org/doc/libs/1_74_0/libs/mpl/doc/refmanual/limit-list-size.html
+# link with this library, if your code includes osd/PeeringState.h (indirectly)
+add_library(Boost::MPL INTERFACE IMPORTED)
+set_target_properties(Boost::MPL PROPERTIES
+  INTERFACE_COMPILE_DEFINITIONS
+    "BOOST_MPL_CFG_NO_PREPROCESSED_HEADERS;BOOST_MPL_LIMIT_LIST_SIZE=30")
+
 if(WITH_SEASTAR)
   find_package(c-ares 1.13.0 QUIET)
   if(NOT c-ares_FOUND)
@@ -317,7 +327,7 @@ if(WITH_SEASTAR)
       _find_package(${ARGV})
     endif()
   endmacro ()
-  set(Seastar_API_LEVEL "4" CACHE STRING "" FORCE)
+  set(Seastar_API_LEVEL "5" CACHE STRING "" FORCE)
   set(Seastar_HWLOC OFF CACHE BOOL "" FORCE)
   set(Seastar_STD_OPTIONAL_VARIANT_STRINGVIEW ON CACHE BOOL "" FORCE)
   if(Seastar_DPDK)
@@ -437,7 +447,7 @@ if(WITH_DPDK)
 endif()
 
 if(WIN32)
-  list(APPEND ceph_common_deps ws2_32 mswsock bcrypt)
+  list(APPEND ceph_common_deps ws2_32 mswsock iphlpapi bcrypt)
   list(APPEND ceph_common_deps dlfcn_win32)
 endif()
 

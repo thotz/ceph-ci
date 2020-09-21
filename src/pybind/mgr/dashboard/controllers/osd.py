@@ -4,11 +4,12 @@ import json
 import logging
 import time
 
-from ceph.deployment.drive_group import DriveGroupSpec, DriveGroupValidationError
+from ceph.deployment.drive_group import DriveGroupSpec, DriveGroupValidationError  # type: ignore
 from mgr_util import get_most_recent_rate
 
-from . import ApiController, RESTController, Endpoint, Task, EndpointDoc, ControllerDoc
-from . import CreatePermission, ReadPermission, UpdatePermission, DeletePermission
+from . import ApiController, RESTController, Endpoint, Task
+from . import CreatePermission, ReadPermission, UpdatePermission, DeletePermission, \
+    allow_empty_body, ControllerDoc, EndpointDoc
 from .orchestrator import raise_if_no_orchestrator
 from .. import mgr
 from ..exceptions import DashboardException
@@ -17,10 +18,8 @@ from ..services.ceph_service import CephService, SendCommandError
 from ..services.exception import handle_send_command_error, handle_orchestrator_error
 from ..services.orchestrator import OrchClient, OrchFeature
 from ..tools import str_to_bool
-try:
-    from typing import Dict, List, Any, Union  # noqa: F401 pylint: disable=unused-import
-except ImportError:  # pragma: no cover
-    pass  # For typing only
+
+from typing import Any, Dict, List, Union  # pylint: disable=C0411
 
 
 logger = logging.getLogger('controllers.osd')
@@ -43,7 +42,7 @@ def osd_task(name, metadata, wait_for=2.0):
 
 
 @ApiController('/osd', Scope.OSD)
-@ControllerDoc("Get OSD Details", "OSD")
+@ControllerDoc('OSD management API', 'OSD')
 class Osd(RESTController):
     def list(self):
         osds = self.get_osd_map()
@@ -112,22 +111,11 @@ class Osd(RESTController):
         """
         Returns collected data about an OSD.
 
-        :return: Returns the requested data. The `histogram` key may contain a
-                 string with an error that occurred if the OSD is down.
+        :return: Returns the requested data.
         """
-        try:
-            histogram = CephService.send_command(
-                'osd', srv_spec=svc_id, prefix='perf histogram dump')
-        except SendCommandError as e:  # pragma: no cover - the handling is too obvious
-            if 'osd down' in str(e):  # pragma: no cover - no complexity there
-                histogram = str(e)
-            else:  # pragma: no cover - no complexity there
-                raise
-
         return {
             'osd_map': self.get_osd_map(svc_id),
             'osd_metadata': mgr.get_metadata('osd', svc_id),
-            'histogram': histogram,
         }
 
     def set(self, svc_id, device_class):  # pragma: no cover
@@ -172,7 +160,7 @@ class Osd(RESTController):
     @osd_task('delete', {'svc_id': '{svc_id}'})
     def delete(self, svc_id, preserve_id=None, force=None):  # pragma: no cover
         replace = False
-        check = False
+        check: Union[Dict[str, Any], bool] = False
         try:
             if preserve_id is not None:
                 replace = str_to_bool(preserve_id)
@@ -202,23 +190,33 @@ class Osd(RESTController):
 
     @RESTController.Resource('POST', query_params=['deep'])
     @UpdatePermission
+    @allow_empty_body
     def scrub(self, svc_id, deep=False):
         api_scrub = "osd deep-scrub" if str_to_bool(deep) else "osd scrub"
         CephService.send_command("mon", api_scrub, who=svc_id)
 
-    @RESTController.Resource('POST')
-    def mark_out(self, svc_id):
-        CephService.send_command('mon', 'osd out', ids=[svc_id])
+    @RESTController.Resource('PUT')
+    @EndpointDoc("Mark OSD flags (out, in, down, lost, ...)",
+                 parameters={'svc_id': (str, 'SVC ID')})
+    def mark(self, svc_id, action):
+        """
+        Note: osd must be marked `down` before marking lost.
+        """
+        valid_actions = ['out', 'in', 'down', 'lost']
+        args = {'srv_type': 'mon', 'prefix': 'osd ' + action}
+        if action.lower() in valid_actions:
+            if action == 'lost':
+                args['id'] = int(svc_id)
+                args['yes_i_really_mean_it'] = True
+            else:
+                args['ids'] = [svc_id]
+
+            CephService.send_command(**args)
+        else:
+            logger.error("Invalid OSD mark action: %s attempted on SVC_ID: %s", action, svc_id)
 
     @RESTController.Resource('POST')
-    def mark_in(self, svc_id):
-        CephService.send_command('mon', 'osd in', ids=[svc_id])
-
-    @RESTController.Resource('POST')
-    def mark_down(self, svc_id):
-        CephService.send_command('mon', 'osd down', ids=[svc_id])
-
-    @RESTController.Resource('POST')
+    @allow_empty_body
     def reweight(self, svc_id, weight):
         """
         Reweights the OSD temporarily.
@@ -238,17 +236,6 @@ class Osd(RESTController):
             'osd reweight',
             id=int(svc_id),
             weight=float(weight))
-
-    @RESTController.Resource('POST')
-    def mark_lost(self, svc_id):
-        """
-        Note: osd must be marked `down` before marking lost.
-        """
-        CephService.send_command(
-            'mon',
-            'osd lost',
-            id=int(svc_id),
-            yes_i_really_mean_it=True)
 
     def _create_bare(self, data):
         """Create a OSD container that has no associated device.
@@ -293,6 +280,7 @@ class Osd(RESTController):
             component='osd', http_status_code=400, msg='Unknown method: {}'.format(method))
 
     @RESTController.Resource('POST')
+    @allow_empty_body
     def purge(self, svc_id):
         """
         Note: osd must be marked `down` before removal.
@@ -301,6 +289,7 @@ class Osd(RESTController):
                                  yes_i_really_mean_it=True)
 
     @RESTController.Resource('POST')
+    @allow_empty_body
     def destroy(self, svc_id):
         """
         Mark osd as being destroyed. Keeps the ID intact (allowing reuse), but
@@ -363,7 +352,7 @@ class Osd(RESTController):
 
 
 @ApiController('/osd/flags', Scope.OSD)
-@ControllerDoc("OSD Flags controller Management API", "OsdFlagsController")
+@ControllerDoc(group='OSD')
 class OsdFlagsController(RESTController):
     @staticmethod
     def _osd_flags():

@@ -78,7 +78,6 @@ export class OsdService {
     interface OsdData {
       osd_map: { [key: string]: any };
       osd_metadata: { [key: string]: any };
-      histogram: { [key: string]: object };
       smart: { [device_identifier: string]: any };
     }
     return this.http.get<OsdData>(`${this.path}/${id}`);
@@ -104,15 +103,15 @@ export class OsdService {
   }
 
   markOut(id: number) {
-    return this.http.post(`${this.path}/${id}/mark_out`, null);
+    return this.http.put(`${this.path}/${id}/mark`, { action: 'out' });
   }
 
   markIn(id: number) {
-    return this.http.post(`${this.path}/${id}/mark_in`, null);
+    return this.http.put(`${this.path}/${id}/mark`, { action: 'in' });
   }
 
   markDown(id: number) {
-    return this.http.post(`${this.path}/${id}/mark_down`, null);
+    return this.http.put(`${this.path}/${id}/mark`, { action: 'down' });
   }
 
   reweight(id: number, weight: number) {
@@ -124,7 +123,7 @@ export class OsdService {
   }
 
   markLost(id: number) {
-    return this.http.post(`${this.path}/${id}/mark_lost`, null);
+    return this.http.put(`${this.path}/${id}/mark`, { action: 'lost' });
   }
 
   purge(id: number) {

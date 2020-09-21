@@ -247,6 +247,33 @@ private:
 
   std::set<std::string> outside_quorum;
 
+  bool stretch_mode_engaged{false};
+  bool degraded_stretch_mode{false};
+  bool recovering_stretch_mode{false};
+  string stretch_bucket_divider;
+  map<string, set<string>> dead_mon_buckets; // bucket->mon ranks, locations with no live mons
+  set<string> up_mon_buckets; // locations with a live mon
+  void do_stretch_mode_election_work();
+
+  bool session_stretch_allowed(MonSession *s, MonOpRequestRef& op);
+  void disconnect_disallowed_stretch_sessions();
+public:
+  bool is_stretch_mode() { return stretch_mode_engaged; }
+  bool is_degraded_stretch_mode() { return degraded_stretch_mode; }
+  bool is_recovering_stretch_mode() { return recovering_stretch_mode; }
+  void maybe_engage_stretch_mode();
+  void maybe_go_degraded_stretch_mode();
+  void trigger_degraded_stretch_mode(const set<string>& dead_mons,
+				     const set<int>& dead_buckets);
+  void set_degraded_stretch_mode();
+  void go_recovery_stretch_mode();
+  void trigger_healthy_stretch_mode();
+  void set_healthy_stretch_mode();
+  void enable_stretch_mode();
+
+  
+private:
+
   /**
    * @defgroup Monitor_h_scrub
    * @{
@@ -692,11 +719,10 @@ public:
   void handle_command(MonOpRequestRef op);
   void handle_route(MonOpRequestRef op);
 
-  void handle_mon_metadata(MonOpRequestRef op);
   int get_mon_metadata(int mon, ceph::Formatter *f, std::ostream& err);
   int print_nodes(ceph::Formatter *f, std::ostream& err);
 
-  // Accumulate metadata across calls to update_mon_metadata
+  // track metadata reported by win_election()
   std::map<int, Metadata> mon_metadata;
   std::map<int, Metadata> pending_metadata;
 
@@ -754,7 +780,8 @@ protected:
 
 public:
 
-  void get_cluster_status(std::stringstream &ss, ceph::Formatter *f);
+  void get_cluster_status(std::stringstream &ss, ceph::Formatter *f,
+			  MonSession *session);
 
   void reply_command(MonOpRequestRef op, int rc, const std::string &rs, version_t version);
   void reply_command(MonOpRequestRef op, int rc, const std::string &rs, ceph::buffer::list& rdata, version_t version);
@@ -809,6 +836,7 @@ public:
   void waitlist_or_zap_client(MonOpRequestRef op);
 
   void send_mon_message(Message *m, int rank);
+  void notify_new_monmap();
 
 public:
   struct C_Command : public C_MonOp {
@@ -932,7 +960,6 @@ private:
   void extract_save_mon_key(KeyRing& keyring);
 
   void collect_metadata(Metadata *m);
-  void update_mon_metadata(int from, Metadata&& m);
   int load_metadata();
   void count_metadata(const std::string& field, ceph::Formatter *f);
   void count_metadata(const std::string& field, std::map<std::string,int> *out);

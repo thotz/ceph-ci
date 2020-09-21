@@ -140,7 +140,7 @@ class CherryPyConfig(object):
                 'application/javascript',
             ],
             'tools.json_in.on': True,
-            'tools.json_in.force': False,
+            'tools.json_in.force': True,
             'tools.plugin_hooks_filter_request.on': True,
         }
 
@@ -278,7 +278,8 @@ class Module(MgrModule, CherryPyConfig):
             return False, "Missing dependency: cherrypy"
 
         if not os.path.exists(cls.get_frontend_path()):
-            return False, "Frontend assets not found: incomplete build?"
+            return False, ("Frontend assets not found at '{}': incomplete build?"
+                           .format(cls.get_frontend_path()))
 
         return True, ""
 

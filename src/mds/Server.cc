@@ -475,8 +475,8 @@ void Server::finish_reclaim_session(Session *session, const ref_t<MClientReclaim
     if (blocklisted || !g_conf()->mds_session_blocklist_on_evict) {
       kill_session(target, send_reply);
     } else {
-      std::stringstream ss;
-      mds->evict_client(target->get_client().v, false, true, ss, send_reply);
+      CachedStackStringStream css;
+      mds->evict_client(target->get_client().v, false, true, *css, send_reply);
     }
   } else if (reply) {
     mds->send_message_client(reply, session);
@@ -491,6 +491,12 @@ void Server::handle_client_reclaim(const cref_t<MClientReclaim> &m)
 
   if (!session) {
     dout(0) << " ignoring sessionless msg " << *m << dendl;
+    return;
+  }
+
+  std::string_view fs_name = mds->get_fs_name();
+  if (!fs_name.empty() && !session->fs_name_capable(fs_name, MAY_READ)) {
+    dout(0) << " dropping message not allowed for this fs_name: " << *m << dendl;
     return;
   }
 
@@ -519,6 +525,16 @@ void Server::handle_client_session(const cref_t<MClientSession> &m)
     auto reply = make_message<MClientSession>(CEPH_SESSION_REJECT);
     reply->metadata["error_string"] = "sessionless";
     mds->send_message(reply, m->get_connection());
+    return;
+  }
+
+  std::string_view fs_name = mds->get_fs_name();
+  if (!fs_name.empty() && !session->fs_name_capable(fs_name, MAY_READ)) {
+    dout(0) << " dropping message not allowed for this fs_name: " << *m << dendl;
+    auto reply = make_message<MClientSession>(CEPH_SESSION_REJECT);
+    reply->metadata["error_string"] = "client doesn't have caps for FS \"" +
+				      std::string(fs_name) + "\"";
+    mds->send_message(std::move(reply), m->get_connection());
     return;
   }
 
@@ -598,7 +614,12 @@ void Server::handle_client_session(const cref_t<MClientSession> &m)
 
       if (blocklisted) {
 	dout(10) << "rejecting blocklisted client " << addr << dendl;
-	send_reject_message("blocklisted");
+	// This goes on the wire and the "blacklisted" substring is
+	// depended upon by the kernel client for detecting whether it
+	// has been blocklisted.  If mounted with recover_session=clean
+	// (since 5.4), it tries to automatically recover itself from
+	// blocklisting.
+	send_reject_message("blocklisted (blacklisted)");
 	session->clear();
 	break;
       }
@@ -616,9 +637,9 @@ void Server::handle_client_session(const cref_t<MClientSession> &m)
       feature_bitset_t missing_features = required_client_features;
       missing_features -= client_metadata.features;
       if (!missing_features.empty()) {
-	stringstream ss;
-	ss << "missing required features '" << missing_features << "'";
-	send_reject_message(ss.str());
+	CachedStackStringStream css;
+	*css << "missing required features '" << missing_features << "'";
+	send_reject_message(css->strv());
 	mds->clog->warn() << "client session (" << session->info.inst
                           << ") lacks required features " << missing_features
                           << "; client supports " << client_metadata.features;
@@ -630,22 +651,22 @@ void Server::handle_client_session(const cref_t<MClientSession> &m)
       // root is actually within the caps of the session
       if (auto it = client_metadata.find("root"); it != client_metadata.end()) {
 	auto claimed_root = it->second;
-	stringstream ss;
+	CachedStackStringStream css;
 	bool denied = false;
 	// claimed_root has a leading "/" which we strip before passing
 	// into caps check
 	if (claimed_root.empty() || claimed_root[0] != '/') {
 	  denied = true;
-	  ss << "invalue root '" << claimed_root << "'";
+	  *css << "invalue root '" << claimed_root << "'";
 	} else if (!session->auth_caps.path_capable(claimed_root.substr(1))) {
 	  denied = true;
-	  ss << "non-allowable root '" << claimed_root << "'";
+	  *css << "non-allowable root '" << claimed_root << "'";
 	}
 
 	if (denied) {
 	  // Tell the client we're rejecting their open
-	  send_reject_message(ss.str());
-	  mds->clog->warn() << "client session with " << ss.str()
+	  send_reject_message(css->strv());
+	  mds->clog->warn() << "client session with " << css->strv()
 			    << " denied (" << session->info.inst << ")";
 	  session->clear();
 	  break;
@@ -1147,8 +1168,8 @@ void Server::find_idle_sessions()
 	     << " last renewed caps " << last_cap_renew_span << "s ago" << dendl;
 
     if (g_conf()->mds_session_blocklist_on_timeout) {
-      std::stringstream ss;
-      mds->evict_client(session->get_client().v, false, true, ss, nullptr);
+      CachedStackStringStream css;
+      mds->evict_client(session->get_client().v, false, true, *css, nullptr);
     } else {
       kill_session(session, NULL);
     }
@@ -1169,10 +1190,10 @@ void Server::evict_cap_revoke_non_responders() {
     dout(1) << __func__ << ": evicting cap revoke non-responder client id "
             << client << dendl;
 
-    std::stringstream ss;
+    CachedStackStringStream css;
     bool evicted = mds->evict_client(client.v, false,
                                      g_conf()->mds_session_blocklist_on_evict,
-                                     ss, nullptr);
+                                     *css, nullptr);
     if (evicted && logger) {
       logger->inc(l_mdss_cap_revoke_eviction);
     }
@@ -1405,9 +1426,9 @@ void Server::handle_client_reconnect(const cref_t<MClientReconnect> &m)
       feature_bitset_t missing_features = required_client_features;
       missing_features -= session->info.client_metadata.features;
       if (!missing_features.empty()) {
-	stringstream ss;
-	ss << "missing required features '" << missing_features << "'";
-	error_str = ss.str();
+	CachedStackStringStream css;
+	*css << "missing required features '" << missing_features << "'";
+	error_str = css->strv();
       }
     }
 
@@ -1555,9 +1576,9 @@ void Server::update_required_client_features()
 
 	mds->clog->warn() << "evicting session " << *session << ", missing required features '"
 			  << missing_features << "'";
-	std::stringstream ss;
+	CachedStackStringStream css;
 	mds->evict_client(session->get_client().v, false,
-			  g_conf()->mds_session_blocklist_on_evict, ss);
+			  g_conf()->mds_session_blocklist_on_evict, *css);
       }
     }
   }
@@ -1654,8 +1675,8 @@ void Server::reconnect_tick()
 		      << " seconds during MDS startup";
 
     if (g_conf()->mds_session_blocklist_on_timeout) {
-      std::stringstream ss;
-      mds->evict_client(session->get_client().v, false, true, ss,
+      CachedStackStringStream css;
+      mds->evict_client(session->get_client().v, false, true, *css,
 			gather.new_sub());
     } else {
       kill_session(session, NULL, true);
@@ -2367,13 +2388,13 @@ void Server::handle_client_request(const cref_t<MClientRequest> &req)
       if (session->get_num_completed_requests() >=
 	  (g_conf()->mds_max_completed_requests << session->get_num_trim_requests_warnings())) {
 	session->inc_num_trim_requests_warnings();
-	stringstream ss;
-	ss << "client." << session->get_client() << " does not advance its oldest_client_tid ("
+	CachedStackStringStream css;
+	*css << "client." << session->get_client() << " does not advance its oldest_client_tid ("
 	   << req->get_oldest_client_tid() << "), "
 	   << session->get_num_completed_requests()
 	   << " completed requests recorded in session\n";
-	mds->clog->warn() << ss.str();
-	dout(20) << __func__ << " " << ss.str() << dendl;
+	mds->clog->warn() << css->strv();
+	dout(20) << __func__ << " " << css->strv() << dendl;
       }
     }
   }
@@ -4399,6 +4420,7 @@ void Server::handle_client_openc(MDRequestRef& mdr)
     _inode->client_ranges[client].range.first = 0;
     _inode->client_ranges[client].range.last = _inode->layout.stripe_unit;
     _inode->client_ranges[client].follows = follows;
+    newi->mark_clientwriteable();
     cap->mark_clientwriteable();
   }
   
@@ -5000,12 +5022,9 @@ void Server::handle_client_setattr(MDRequestRef& mdr)
     pi.inode->mtime = mdr->get_op_stamp();
 
     // adjust client's max_size?
-    CInode::mempool_inode::client_range_map new_ranges;
-    bool max_increased = false;
-    mds->locker->calc_new_client_ranges(cur, pi.inode->size, true, &new_ranges, &max_increased);
-    if (pi.inode->client_ranges != new_ranges) {
-      dout(10) << " client_ranges " << pi.inode->client_ranges << " -> " << new_ranges << dendl;
-      pi.inode->client_ranges = new_ranges;
+    if (mds->locker->calc_new_client_ranges(cur, pi.inode->size)) {
+      dout(10) << " client_ranges "  << cur->get_previous_projected_inode()->client_ranges
+	       << " -> " << pi.inode->client_ranges << dendl;
       changed_ranges = true;
     }
   }
@@ -5066,6 +5085,7 @@ void Server::do_open_truncate(MDRequestRef& mdr, int cmode)
     pi.inode->client_ranges[client].range.last = pi.inode->get_layout_size_increment();
     pi.inode->client_ranges[client].follows = realm->get_newest_seq();
     changed_ranges = true;
+    in->mark_clientwriteable();
     cap->mark_clientwriteable();
   }
   
@@ -6084,6 +6104,7 @@ void Server::handle_client_mknod(MDRequestRef& mdr)
       _inode->client_ranges[client].range.first = 0;
       _inode->client_ranges[client].range.last = _inode->layout.stripe_unit;
       _inode->client_ranges[client].follows = follows;
+      newi->mark_clientwriteable();
       cap->mark_clientwriteable();
     }
   }

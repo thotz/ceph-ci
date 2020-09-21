@@ -41,6 +41,7 @@
 #include "messages/MMonJoin.h"
 #include "messages/MMonElection.h"
 #include "messages/MMonSync.h"
+#include "messages/MMonPing.h"
 #include "messages/MMonScrub.h"
 
 #include "messages/MLog.h"
@@ -110,7 +111,6 @@
 #include "messages/MMonGetVersionReply.h"
 #include "messages/MMonHealth.h"
 #include "messages/MMonHealthChecks.h"
-#include "messages/MMonMetadata.h"
 #include "messages/MAuth.h"
 #include "messages/MAuthReply.h"
 #include "messages/MMonSubscribe.h"
@@ -415,6 +415,9 @@ Message *decode_message(CephContext *cct,
   case MSG_MON_SYNC:
     m = make_message<MMonSync>();
     break;
+  case MSG_MON_PING:
+    m = make_message<MMonPing>();
+    break;
   case MSG_MON_SCRUB:
     m = make_message<MMonScrub>();
     break;
@@ -472,9 +475,6 @@ Message *decode_message(CephContext *cct,
     break;
   case CEPH_MSG_MON_GET_VERSION_REPLY:
     m = make_message<MMonGetVersionReply>();
-    break;
-  case CEPH_MSG_MON_METADATA:
-    m = make_message<MMonMetadata>();
     break;
 
   case MSG_OSD_BOOT:

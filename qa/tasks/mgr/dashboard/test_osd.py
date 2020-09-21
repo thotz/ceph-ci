@@ -19,7 +19,7 @@ class OsdTest(DashboardTestCase):
         cls.mgr_cluster.mon_manager.raw_cluster_cmd(*cmd)
 
     def tearDown(self):
-        self._post('/api/osd/0/mark_in')
+        self._put('/api/osd/0/mark', data={'action': 'in'})
 
     @DashboardTestCase.RunAs('test', 'test', ['block-manager'])
     def test_access_permissions(self):
@@ -49,10 +49,7 @@ class OsdTest(DashboardTestCase):
     def test_details(self):
         data = self._get('/api/osd/0')
         self.assertStatus(200)
-        self.assert_in_and_not_none(data, ['osd_metadata', 'histogram'])
-        self.assert_in_and_not_none(data['histogram'], ['osd'])
-        self.assert_in_and_not_none(data['histogram']['osd'], ['op_w_latency_in_bytes_histogram',
-                                                               'op_r_latency_out_bytes_histogram'])
+        self.assert_in_and_not_none(data, ['osd_metadata'])
 
     def test_scrub(self):
         self._post('/api/osd/0/scrub?deep=False')
@@ -75,14 +72,14 @@ class OsdTest(DashboardTestCase):
         self.assertStatus(200)
 
     def test_mark_out_and_in(self):
-        self._post('/api/osd/0/mark_out')
+        self._put('/api/osd/0/mark', data={'action': 'out'})
         self.assertStatus(200)
 
-        self._post('/api/osd/0/mark_in')
+        self._put('/api/osd/0/mark', data={'action': 'in'})
         self.assertStatus(200)
 
     def test_mark_down(self):
-        self._post('/api/osd/0/mark_down')
+        self._put('/api/osd/0/mark', data={'action': 'down'})
         self.assertStatus(200)
 
     def test_reweight(self):
@@ -124,7 +121,7 @@ class OsdTest(DashboardTestCase):
         self.assertStatus(400)
 
         # Lost
-        self._post('/api/osd/5/mark_lost')
+        self._put('/api/osd/5/mark', data={'action': 'lost'})
         self.assertStatus(200)
         # Destroy
         self._post('/api/osd/5/destroy')
