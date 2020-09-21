@@ -1918,14 +1918,19 @@ void Objecter::_get_latest_version(epoch_t oldest, epoch_t newest,
 				   std::unique_ptr<OpCompletion> fin,
 				   std::unique_lock<ceph::shared_mutex>&& l)
 {
+  ldout(cct, -1) << __PRETTY_FUNCTION__ << ":" << __LINE__ << dendl;
   ceph_assert(fin);
   if (osdmap->get_epoch() >= newest) {
+    ldout(cct, -1) << __PRETTY_FUNCTION__ << ":" << __LINE__ << dendl;
     ldout(cct, 10) << __func__ << " latest " << newest << ", have it" << dendl;
     l.unlock();
+    ldout(cct, -1) << __PRETTY_FUNCTION__ << ":" << __LINE__ << dendl;
     ca::defer(std::move(fin), bs::error_code{});
   } else {
+    ldout(cct, -1) << __PRETTY_FUNCTION__ << ":" << __LINE__ << dendl;
     ldout(cct, 10) << __func__ << " latest " << newest << ", waiting" << dendl;
     _wait_for_new_map(std::move(fin), newest, bs::error_code{});
+    ldout(cct, -1) << __PRETTY_FUNCTION__ << ":" << __LINE__ << dendl;
     l.unlock();
   }
 }

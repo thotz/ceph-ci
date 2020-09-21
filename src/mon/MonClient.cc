@@ -1334,8 +1334,10 @@ void MonClient::_finish_command(MonCommand *r, bs::error_code ret,
 
 void MonClient::handle_get_version_reply(MMonGetVersionReply* m)
 {
+  ldout(cct, -1) << __PRETTY_FUNCTION__ << ":" << __LINE__ << dendl;
   ceph_assert(ceph_mutex_is_locked(monc_lock));
   auto iter = version_requests.find(m->handle);
+  ldout(cct, -1) << __PRETTY_FUNCTION__ << ":" << __LINE__ << dendl;
   if (iter == version_requests.end()) {
     ldout(cct, 0) << __func__ << " version request with handle " << m->handle
 		  << " not found" << dendl;
@@ -1344,6 +1346,7 @@ void MonClient::handle_get_version_reply(MMonGetVersionReply* m)
     ldout(cct, 10) << __func__ << " finishing " << iter->first << " version "
 		   << m->version << dendl;
     version_requests.erase(iter);
+    ldout(cct, -1) << __PRETTY_FUNCTION__ << ":" << __LINE__ << dendl;
     ceph::async::defer(std::move(req), bs::error_code(),
 		       m->version, m->oldest_version);
   }

@@ -742,14 +742,17 @@ public:
   auto get_version(std::string&& map, CompletionToken&& token) {
     boost::asio::async_completion<CompletionToken, VersionSig> init(token);
     {
+      ldout(cct, -1) << __PRETTY_FUNCTION__ << ":" << __LINE__ << dendl;
       std::scoped_lock l(monc_lock);
       auto m = ceph::make_message<MMonGetVersion>();
       m->what = std::move(map);
       m->handle = ++version_req_id;
+      ldout(cct, -1) << __PRETTY_FUNCTION__ << ":" << __LINE__ << dendl;
       version_requests.emplace(m->handle,
 			       VersionCompletion::create(
 				 service.get_executor(),
 				 std::move(init.completion_handler)));
+      ldout(cct, -1) << __PRETTY_FUNCTION__ << ":" << __LINE__ << dendl;
       _send_mon_message(m);
     }
     return init.result.get();

@@ -2742,22 +2742,32 @@ public:
   bool have_map(epoch_t epoch);
 
   struct CB_Objecter_GetVersion {
+    static constexpr auto dout_subsys = ceph_subsys_objecter;
     Objecter *objecter;
     std::unique_ptr<OpCompletion> fin;
 
     CB_Objecter_GetVersion(Objecter *o, std::unique_ptr<OpCompletion> c)
-      : objecter(o), fin(std::move(c)) {}
+      : objecter(o), fin(std::move(c)) {
+      ldout(objecter->cct, -1) << __PRETTY_FUNCTION__ << ":" << __LINE__ << dendl;
+    }
     void operator()(boost::system::error_code ec, version_t newest,
 		    version_t oldest) {
+      ldout(objecter->cct, -1) << __PRETTY_FUNCTION__ << ":" << __LINE__ << dendl;
       if (ec == boost::system::errc::resource_unavailable_try_again) {
 	// try again as instructed
+	ldout(objecter->cct, -1) << __PRETTY_FUNCTION__ << ":" << __LINE__ << dendl;
 	objecter->wait_for_latest_osdmap(std::move(fin));
+	ldout(objecter->cct, -1) << __PRETTY_FUNCTION__ << ":" << __LINE__ << dendl;
       } else if (ec) {
+	ldout(objecter->cct, -1) << __PRETTY_FUNCTION__ << ":" << __LINE__ << dendl;
 	ceph::async::post(std::move(fin), ec);
+	ldout(objecter->cct, -1) << __PRETTY_FUNCTION__ << ":" << __LINE__ << dendl;
       } else {
 	auto l = std::unique_lock(objecter->rwlock);
+	ldout(objecter->cct, -1) << __PRETTY_FUNCTION__ << ":" << __LINE__ << dendl;
 	objecter->_get_latest_version(oldest, newest, std::move(fin),
 				      std::move(l));
+	ldout(objecter->cct, -1) << __PRETTY_FUNCTION__ << ":" << __LINE__ << dendl;
       }
     }
   };
@@ -2788,14 +2798,24 @@ public:
   template<typename CompletionToken>
   typename boost::asio::async_result<CompletionToken, OpSignature>::return_type
   wait_for_latest_osdmap(CompletionToken&& token) {
+    constexpr auto dout_subsys = ceph_subsys_objecter;
     boost::asio::async_completion<CompletionToken, OpSignature> init(token);
 
+    ldout(cct, -1) << __PRETTY_FUNCTION__ << ":" << __LINE__ << dendl;
     monc->get_version("osdmap",
 		      CB_Objecter_GetVersion(
 			this,
 			OpCompletion::create(service.get_executor(),
 					     std::move(init.completion_handler))));
-    return init.result.get();
+    ldout(cct, -1) << __PRETTY_FUNCTION__ << ":" << __LINE__ << dendl;
+    if constexpr (std::is_void_v<typename boost::asio::async_result<
+		    CompletionToken, OpSignature>::return_type>) {
+      return init.result.get();
+    } else {
+      auto&& x = init.result.get();
+      ldout(cct, -1) << __PRETTY_FUNCTION__ << ":" << __LINE__ << dendl;
+      return x;
+    }
   }
 
   void wait_for_latest_osdmap(std::unique_ptr<OpCompletion> c) {
