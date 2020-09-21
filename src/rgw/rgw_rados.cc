@@ -6755,6 +6755,10 @@ int RGWRados::get_obj_iterate_cb(const rgw_raw_obj& read_obj, off_t obj_ofs,
   ldout(cct, 20) << "rados->get_obj_iterate_cb oid=" << read_obj.oid << " obj-ofs=" << obj_ofs << " read_ofs=" << read_ofs << " len=" << len << dendl;
   op.read(read_ofs, len, pbl, nullptr);
 
+  if(read_obj.pool != d->io_ctx.get_pool_name()) {
+    ldout(cct, 20) << "rados->get_obj_iterate_cb changing io_ctx pool from " << d->io_ctx.get_pool_name() << " to " << read_obj.pool << dendl;
+    rados.ioctx_create(read_obj.pool.to_str().c_str(), d->io_ctx);
+  }
   librados::IoCtx io_ctx(d->io_ctx);
   io_ctx.locator_set_key(read_obj.loc);
 
