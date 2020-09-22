@@ -44,6 +44,25 @@ class TestProgress(MgrTestCase):
         log.info(json.dumps(p, indent=2))
         return p['events']
 
+    def is_osd_marked_out(self, ev):
+        ev_message = ev['message']
+        if len(ev_message) < 10:
+            return False
+        else:
+            return ev_message[-10:] == "marked out"
+
+    def _osd_out_events_count(self):
+        """
+        Count the number of on going recovery events that deals with
+        OSDs being marked out
+        """
+        events_in_progress = self._events_in_progress()
+        count = 0
+        for ev in events_in_progress:
+            if self.is_osd_marked_out(ev):
+                count += 1
+        return count
+
     def _setup_pool(self, size=None):
         self.mgr_cluster.mon_manager.create_pool(self.POOL)
         if size is not None:
@@ -110,19 +129,16 @@ class TestProgress(MgrTestCase):
         ev = self._all_events()[0]
         log.info(json.dumps(ev, indent=1))
         self.assertIn("Rebalancing after osd.0 marked out", ev['message'])
-        
         return ev
 
     def _simulate_back_in(self, osd_ids, initial_event):
-        
         for osd_id in osd_ids:
             self.mgr_cluster.mon_manager.raw_cluster_cmd(
-                    'osd', 'in', str(osd_id))
-        
+                    'osd', 'in', str(osd_id)) 
+
         # First Event should complete promptly
         self.wait_until_true(lambda: self._is_complete(initial_event['id']),
                              timeout=self.EVENT_CREATION_PERIOD)
-
         try:
             # Wait for progress event marked in to pop up
             self.wait_until_equal(lambda: len(self._events_in_progress()), 1,
@@ -135,8 +151,6 @@ class TestProgress(MgrTestCase):
             return None
 
         new_event = self._events_in_progress()[0]
-        log.info(json.dumps(new_event, indent=1))
-        self.assertIn("Rebalancing after osd.0 marked in", new_event['message'])    
         
         return new_event
 
@@ -243,7 +257,7 @@ class TestProgress(MgrTestCase):
 
         # We should see an event for each of the OSDs we took out
         self.wait_until_equal(
-            lambda: len(self._all_events()),
+            lambda: self._osd_out_events_count(),
             osd_count - pool_size,
             timeout=self.EVENT_CREATION_PERIOD)
 
