@@ -10484,7 +10484,7 @@ void PrimaryLogPG::op_applied(const eversion_t &applied_version)
   recovery_state.local_write_applied(applied_version);
 
   if (is_primary() && scrubber_->should_requeue_blocked_ops(recovery_state.get_last_update_applied())) {
-    osd->queue_scrub_applied_update(this, ops_blocked_by_scrub());
+    osd->queue_scrub_applied_update(this, is_scrub_blocking_ops());
   }
 }
 
@@ -11381,7 +11381,7 @@ void PrimaryLogPG::kick_object_context_blocked(ObjectContextRef obc)
     // only requeue if we are still active: we may be unblocking
     // because we are resetting for a new peering interval
     if (is_active()) {
-      osd->queue_scrub_unblocking(this, ops_blocked_by_scrub());
+      osd->queue_scrub_unblocking(this, is_scrub_blocking_ops());
     }
   }
 }
@@ -12042,7 +12042,6 @@ void PrimaryLogPG::on_shutdown()
     osd->clear_queued_recovery(this);
   }
 
-  clear_scrub_reserved();
   scrubber_->scrub_clear_state();
   planned_scrub_ = requested_scrub_t{};
 
@@ -12165,7 +12164,7 @@ void PrimaryLogPG::on_change(ObjectStore::Transaction &t)
   requeue_ops(waiting_for_active);
   requeue_ops(waiting_for_readable);
 
-  clear_scrub_reserved();
+  scrubber_->clear_scrub_reservations();
 
   vector<ceph_tid_t> tids;
   cancel_copy_ops(is_primary(), &tids);
@@ -12194,10 +12193,8 @@ void PrimaryLogPG::on_change(ObjectStore::Transaction &t)
     finish_degraded_object(p->first);
   }
 
-  //dout(13) << __func__ << " (primarylog) flags b4: " << planned_scrub_ << dendl;
+  // requeues waiting_for_scrub
   scrubber_->scrub_clear_state();
-  
-  dout(13) << __func__ << " (primarylog) flags md: " << planned_scrub_ << dendl;
 
   for (auto p = waiting_for_blocked_object.begin();
        p != waiting_for_blocked_object.end();
@@ -14592,6 +14589,17 @@ bool PrimaryLogPG::already_complete(eversion_t v)
 // ==========================================================================================
 // SCRUB
 
+void PrimaryLogPG::do_replica_scrub_map(OpRequestRef op)
+{
+  dout(10) << __func__ << " is scrub active? " << scrubber_->is_scrub_active() << dendl;
+
+  if (!scrubber_->is_scrub_active()) {
+    dout(10) << __func__ << " scrub isn't active" << dendl;
+    // RRR ask whether we should op-start here
+    return;
+  }
+  scrubber_->map_from_replica(op);
+}
 
 bool PrimaryLogPG::_range_available_for_scrub(
   const hobject_t &begin, const hobject_t &end)
