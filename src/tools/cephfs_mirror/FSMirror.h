@@ -47,6 +47,11 @@ public:
     return is_blocklisted(locker);
   }
 
+  Peers get_peers() {
+    std::scoped_lock locker(m_lock);
+    return m_all_peers;
+  }
+
   // admin socket helpers
   void mirror_status(Formatter *f);
 
@@ -116,6 +121,7 @@ private:
   ceph::condition_variable m_cond;
   SnapListener m_snap_listener;
   std::set<std::string, std::less<>> m_directories;
+  Peers m_all_peers;
   std::map<Peer, PeerReplayer> m_peer_replayers;
 
   RadosRef m_cluster;
