@@ -173,6 +173,10 @@
 #define tracepoint(...)
 #endif
 
+#ifdef WITH_JAEGER
+#include "common/tracer.h"
+#endif
+
 #define dout_context cct
 #define dout_subsys ceph_subsys_osd
 #undef dout_prefix
