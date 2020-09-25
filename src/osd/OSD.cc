@@ -1644,6 +1644,13 @@ void OSDService::reply_op_error(OpRequestRef op, int err, eversion_t v,
 				       !m->has_flag(CEPH_OSD_FLAG_RETURNVEC));
   reply->set_reply_versions(v, uv);
   reply->set_op_returns(op_returns);
+#ifdef WITH_JAEGER 
+  auto op_error_span = jaeger_tracing::child_span("reply_op_error", &(op->osd_parent_span));
+  op_error_span->Log({
+      {"type", m->get_type()},
+      {"err code", err}
+      });
+#endif
   m->get_connection()->send_message(reply);
 }
 
@@ -7019,6 +7026,11 @@ void OSD::dispatch_session_waiting(const ceph::ref_t<Session>& session, OSDMapRe
 
 void OSD::ms_fast_dispatch(Message *m)
 {
+
+  if(!jaeger_tracing::tracer){
+    jaeger_tracing::init_tracer("tracing service init osd");
+  }
+
   FUNCTRACE(cct);
   if (service.is_stopping()) {
     m->put();
@@ -7079,13 +7091,22 @@ void OSD::ms_fast_dispatch(Message *m)
     tracepoint(osd, ms_fast_dispatch, reqid.name._type,
         reqid.name._num, reqid.tid, reqid.inc);
   }
-
+#ifdef WITH_JAEGER
+  auto dispatch_span = jaeger_tracing::new_span("op-request-created");
+  op->set_osd_parent_span(dispatch_span);
+#endif
   if (m->trace)
     op->osd_trace.init("osd op", &trace_endpoint, &m->trace);
 
   // note sender epoch, min req's epoch
   op->sent_epoch = static_cast<MOSDFastDispatchOp*>(m)->get_map_epoch();
   op->min_epoch = static_cast<MOSDFastDispatchOp*>(m)->get_min_epoch();
+#ifdef WITH_JAEGER
+  op->osd_parent_span->Log({
+      {"sent epoch by op", op->sent_epoch},
+      {"min epoch for op", op->min_epoch}
+      });
+#endif
   ceph_assert(op->min_epoch <= op->sent_epoch); // sanity check!
 
   service.maybe_inject_dispatch_delay();

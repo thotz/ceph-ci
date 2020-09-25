@@ -409,7 +409,7 @@ if(WITH_JAEGER)
   opentracing::libopentracing
   thrift::libthrift
   jaegertracing::libjaegertracing)
-  include_directories(${CMAKE_BINARY_DIR}/external/include)
+  include_directories(SYSTEM ${CMAKE_BINARY_DIR}/external/include)
   #with CMake 3.12+ the following can be replaced by:
   #target_link_libraries(common-objs jaeger-base)
   install(DIRECTORY ${CMAKE_BINARY_DIR}/external/include/jaegertracing
