@@ -35,11 +35,11 @@ Options
 .. option:: --nbds_max *limit*
 
    Override the parameter of NBD kernel module when modprobe, used to
-   limit the count of nbd device.
+   limit the count of nbd device (ignored unless --legacy specified).
 
 .. option:: --max_part *limit*
 
-    Override for module param nbds_max.
+   Override for module param nbds_max.
 
 .. option:: --exclusive
 
@@ -49,6 +49,9 @@ Options
 
    Override device timeout. Linux kernel will default to a 30 second request timeout.
    Allow the user to optionally specify an alternate timeout.
+
+.. option:: --legacy
+   Use the NBD ioctl interface (old kernels) instead of the default netlink interface.
 
 Image and snap specs
 ====================

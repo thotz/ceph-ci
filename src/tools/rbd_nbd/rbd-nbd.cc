@@ -81,7 +81,7 @@ struct Config {
   bool quiesce = false;
   bool readonly = false;
   bool set_max_part = false;
-  bool try_netlink = false;
+  bool use_ioctl = false;
 
   std::string poolname;
   std::string nsname;
@@ -103,13 +103,13 @@ static void usage()
             << "  --device <device path>  Specify nbd device path (/dev/nbd{num})\n"
             << "  --exclusive             Forbid writes by other clients\n"
             << "  --max_part <limit>      Override for module param max_part\n"
-            << "  --nbds_max <limit>      Override for module param nbds_max\n"
+            << "  --nbds_max <limit>      Override for module param nbds_max (ignored unless --legacy specified)\n"
             << "  --quiesce               Use quiesce callbacks\n"
             << "  --quiesce-hook <path>   Specify quiesce hook path\n"
             << "                          (default: " << Config().quiesce_hook << ")\n"
             << "  --read-only             Map read-only\n"
             << "  --timeout <seconds>     Set nbd request timeout\n"
-            << "  --try-netlink           Use the nbd netlink interface\n"
+            << "  --legacy                Use the nbd ioctl interface (old kernels)\n"
             << "\n"
             << "List options:\n"
             << "  --format plain|json|xml Output format (default: plain)\n"
@@ -625,20 +625,20 @@ class NBDWatchCtx : public librbd::UpdateWatchCtx
 private:
   int fd;
   int nbd_index;
-  bool use_netlink;
+  bool use_ioctl;
   librados::IoCtx &io_ctx;
   librbd::Image &image;
   unsigned long size;
 public:
   NBDWatchCtx(int _fd,
               int _nbd_index,
-              bool _use_netlink,
+              bool _use_ioctl,
               librados::IoCtx &_io_ctx,
               librbd::Image &_image,
               unsigned long _size)
     : fd(_fd)
     , nbd_index(_nbd_index)
-    , use_netlink(_use_netlink)
+    , use_ioctl(_use_ioctl)
     , io_ctx(_io_ctx)
     , image(_image)
     , size(_size)
@@ -658,7 +658,7 @@ public:
         if (ioctl(fd, BLKFLSBUF, NULL) < 0)
           derr << "invalidate page cache failed: " << cpp_strerror(errno)
                << dendl;
-	if (use_netlink) {
+	if (!use_ioctl) {
 	  ret = netlink_resize(nbd_index, new_size);
 	} else {
           ret = ioctl(fd, NBD_SET_SIZE, new_size);
@@ -758,8 +758,18 @@ static int load_module(Config *cfg)
   ostringstream param;
   int ret;
 
-  if (cfg->nbds_max)
-    param << "nbds_max=" << cfg->nbds_max;
+  if (cfg->use_ioctl) {
+    // If user doesn't specify the "--nbds-max" we will
+    // just ignore it here and the kernel module will
+    // setup 16 nbd devices for us by default.
+    if (cfg->nbds_max)
+      param << "nbds_max=" << cfg->nbds_max;
+  } else {
+    // Will set it to 0 for netlink method to avoid the
+    // potential race between mapping and the uevent
+    // sanity check.
+    param << "nbds_max=0";
+  }
 
   if (cfg->max_part)
     param << " max_part=" << cfg->max_part;
@@ -1266,14 +1276,14 @@ static NBDServer *start_server(int fd, librbd::Image& image, Config *cfg)
   return server;
 }
 
-static void run_server(Preforker& forker, NBDServer *server, bool netlink_used)
+static void run_server(Preforker& forker, NBDServer *server, bool use_ioctl)
 {
   if (g_conf()->daemonize) {
     global_init_postfork_finish(g_ceph_context);
     forker.daemonize();
   }
 
-  if (netlink_used)
+  if (!use_ioctl)
     server->wait_for_disconnect();
   else
     ioctl(nbd, NBD_DO_IT);
@@ -1296,7 +1306,6 @@ static int do_map(int argc, const char *argv[], Config *cfg)
   int read_only = 0;
   unsigned long flags;
   unsigned long size;
-  bool use_netlink;
 
   int fd[2];
 
@@ -1403,17 +1412,18 @@ static int do_map(int argc, const char *argv[], Config *cfg)
 
   server = start_server(fd[1], image, cfg);
 
-  use_netlink = cfg->try_netlink;
-  if (use_netlink) {
+  if (!cfg->use_ioctl) {
     r = try_netlink_setup(cfg, fd[0], size, flags);
     if (r < 0) {
       goto free_server;
     } else if (r == 1) {
-      use_netlink = false;
+      // Netlink interface is not supported and
+      // fallback to use ioctl interface.
+      cfg->use_ioctl = true;
     }
   }
 
-  if (!use_netlink) {
+  if (cfg->use_ioctl) {
     r = try_ioctl_setup(cfg, fd[0], size, flags);
     if (r < 0)
       goto free_server;
@@ -1441,7 +1451,7 @@ static int do_map(int argc, const char *argv[], Config *cfg)
 
     uint64_t handle;
 
-    NBDWatchCtx watch_ctx(nbd, nbd_index, use_netlink, io_ctx, image,
+    NBDWatchCtx watch_ctx(nbd, nbd_index, cfg->use_ioctl, io_ctx, image,
                           info.size);
     r = image.update_watch(&watch_ctx, &handle);
     if (r < 0)
@@ -1449,7 +1459,7 @@ static int do_map(int argc, const char *argv[], Config *cfg)
 
     cout << cfg->devpath << std::endl;
 
-    run_server(forker, server, use_netlink);
+    run_server(forker, server, cfg->use_ioctl);
 
     if (cfg->quiesce) {
       r = image.quiesce_unwatch(server->quiesce_watch_handle);
@@ -1462,7 +1472,7 @@ static int do_map(int argc, const char *argv[], Config *cfg)
 
 close_nbd:
   if (r < 0) {
-    if (use_netlink) {
+    if (!cfg->use_ioctl) {
       netlink_disconnect(nbd_index);
     } else {
       ioctl(nbd, NBD_CLEAR_SOCK);
@@ -1682,8 +1692,10 @@ static int parse_args(vector<const char*>& args, std::ostream *err_msg,
                                      (char *)NULL)) {
     } else if (ceph_argparse_flag(args, i, "--pretty-format", (char *)NULL)) {
       cfg->pretty_format = true;
+    } else if (ceph_argparse_flag(args, i, "--legacy", (char *)NULL)) {
+      cfg->use_ioctl = true;
     } else if (ceph_argparse_flag(args, i, "--try-netlink", (char *)NULL)) {
-      cfg->try_netlink = true;
+      *err_msg << "rbd-nbd: --try-netlink is deprecated (already default)";
     } else {
       ++i;
     }
@@ -1771,6 +1783,9 @@ static int rbd_nbd(int argc, const char *argv[])
     cerr << err_msg.str() << std::endl;
     return r;
   }
+
+  if (!err_msg.str().empty())
+    cerr << err_msg.str() << std::endl;
 
   switch (cmd) {
     case Connect:
