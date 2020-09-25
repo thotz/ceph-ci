@@ -125,6 +125,6 @@ struct rxtx_t {
     bool crossed);
 };
 
-} // namespace ceph::crypto::onwire
+} // namespace ::onwire
 
 #endif // CEPH_CRYPTO_ONWIRE_H
