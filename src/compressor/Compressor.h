@@ -73,47 +73,11 @@ public:
   QatAccel qat_accel;
 #endif
 
-  static inline const char* get_comp_alg_name(int a) {
-    auto p = std::find_if(std::cbegin(compression_algorithms), std::cend(compression_algorithms),
-        [a](const auto& kv) { return kv.second == a; });
+  static const char* get_comp_alg_name(int a);
+  static boost::optional<CompressionAlgorithm> get_comp_alg_type(const std::string &s);
 
-    if (std::cend(compression_algorithms) == p)
-    return "???"; // It would be nice to revise this...
-
-    return p->first;
-  }
-
-  static inline boost::optional<CompressionAlgorithm> get_comp_alg_type(const std::string &s) {
-
-    auto p = std::find_if(std::cbegin(compression_algorithms), std::cend(compression_algorithms),
-        [&s](const auto& kv) { return kv.first == s; });
-    if (std::cend(compression_algorithms) == p)
-      return {};
-
-    return p->second;
-  }
-
-  static inline const char *get_comp_mode_name(int m) {
-    switch (m) {
-      case COMP_NONE: return "none";
-      case COMP_PASSIVE: return "passive";
-      case COMP_AGGRESSIVE: return "aggressive";
-      case COMP_FORCE: return "force";
-      default: return "???";
-    }
-  }
-
-  static inline boost::optional<CompressionMode> get_comp_mode_type(const std::string &s) {
-    if (s == "force")
-      return COMP_FORCE;
-    if (s == "aggressive")
-      return COMP_AGGRESSIVE;
-    if (s == "passive")
-      return COMP_PASSIVE;
-    if (s == "none")
-      return COMP_NONE;
-    return boost::optional<CompressionMode>();
-  }
+  static const char *get_comp_mode_name(int m);
+  static boost::optional<CompressionMode> get_comp_mode_type(const std::string &s);
 
   Compressor(CompressionAlgorithm a, const char* t) : alg(a), type(t) {
   }
@@ -137,17 +101,6 @@ protected:
   CompressionAlgorithm alg;
   std::string type;
 
-};
-
-struct CompConnectionMeta {
-  uint32_t con_mode = Compressor::COMP_NONE;  // negotiated mode
-  uint32_t con_method = Compressor::COMP_ALG_NONE; // negotiated method
-
-  bool is_compress() const { return con_mode != Compressor::COMP_NONE; }
-
-  uint32_t get_method() const { return con_method; }
-
-  uint32_t get_mode() const { return con_mode; }
 };
 
 #endif

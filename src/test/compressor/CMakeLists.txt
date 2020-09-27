@@ -8,11 +8,3 @@ add_executable(unittest_compression
 add_ceph_unittest(unittest_compression)
 target_link_libraries(unittest_compression global GTest::GTest)
 add_dependencies(unittest_compression ceph_example)
-
-# unittest_comp_registry
-add_executable(unittest_comp_registry
-  test_comp_registry.cc
-  $<TARGET_OBJECTS:unit-main>
-  )
-add_ceph_unittest(unittest_comp_registry)
-target_link_libraries(unittest_comp_registry global)
