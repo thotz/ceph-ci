@@ -220,6 +220,14 @@ public:
   virtual ~IsPGReadablePredicate() {}
 };
 
+class IsPGRollbackPredicate {
+public:
+  virtual bool operator()(const unsigned have_size, const unsigned pw_size) const {
+    return false;
+  }
+  virtual ~IsPGRollbackPredicate() {}
+};
+
 inline std::ostream& operator<<(std::ostream& out, const osd_reqid_t& r) {
   return out << r.name << "." << r.inc << ":" << r.tid;
 }

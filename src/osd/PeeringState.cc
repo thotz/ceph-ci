@@ -1481,23 +1481,73 @@ map<pg_shard_t, pg_info_t>::const_iterator PeeringState::find_best_info(
   if (min_last_update_acceptable == eversion_t::max())
     return infos.end();
 
+  auto should_ignore_info =
+    [&] (map<pg_shard_t, pg_info_t>::const_iterator info) -> bool {
+      if (restrict_to_up_acting && !is_up(info->first) &&
+          !is_acting(info->first))
+        return true;
+      // Only consider peers with last_update >= min_last_update_acceptable
+      if (info->second.last_update < min_last_update_acceptable)
+        return true;
+      // Disqualify anyone with a too old last_epoch_started
+      if (info->second.last_epoch_started < max_last_epoch_started_found)
+        return true;
+      // Disqualify anyone who is incomplete (not fully backfilled)
+      if (info->second.is_incomplete())
+        return true;
+    };
+
   auto best = infos.end();
+  eversion_t ec_recovrty_to_lu = eversion_t::max();
+  if (pool.info.require_rollback()) {
+    auto cmp = [] (const eversion_t &x, const eversion_t &y) -> bool {
+      return x > y;
+    };
+    map<eversion_t, set<pg_shard_t>, decltype(cmp)> lu_eversion_count(cmp);
+
+    for (auto p = infos.begin(); p != infos.end(); ++p) {
+      if (should_ignore_info(p))
+        continue;
+      auto found = std::find_if(
+        lu_eversion_count.begin(),
+        lu_eversion_count.end(),
+        [&] (auto &x){
+          return x.first == p->second.last_update;
+        }
+      );
+      if (found == lu_eversion_count.end()) {
+        lu_eversion_count.insert({
+          p->second.last_update,
+          set<pg_shard_t>({p->first})});
+      } else {
+        for (auto i = found; i != lu_eversion_count.end(); ++i)
+          i->second.insert(p->first);
+      }
+    }
+
+    auto pw_size =
+      get_osdmap()->get_pg_pool_primary_write_size(info.pgid.pgid);
+    
+    for (auto i = lu_eversion_count.begin(); i != lu_eversion_count.end(); ++i) {
+      bool can_recoverable = missing_loc.get_recoverable_predicate()(i->second);
+      bool should_rollback = missing_loc.get_rollback_predicate()(i->second.size(), pw_size);
+      // can't recovery but not needing to rollback,
+      // it means that primary_write_size osds are unavaiable,
+      // will go to NeedActingChange
+      if (!should_rollback && !can_recoverable)
+        return infos.end();
+      else if (can_recoverable) {
+        ec_recovrty_to_lu = i->first;
+        break;
+      }
+    }
+  }
   // find osd with newest last_update (oldest for ec_pool).
   // if there are multiples, prefer
   //  - a longer tail, if it brings another peer into log contiguity
   //  - the current primary
   for (auto p = infos.begin(); p != infos.end(); ++p) {
-    if (restrict_to_up_acting && !is_up(p->first) &&
-	!is_acting(p->first))
-      continue;
-    // Only consider peers with last_update >= min_last_update_acceptable
-    if (p->second.last_update < min_last_update_acceptable)
-      continue;
-    // Disqualify anyone with a too old last_epoch_started
-    if (p->second.last_epoch_started < max_last_epoch_started_found)
-      continue;
-    // Disqualify anyone who is incomplete (not fully backfilled)
-    if (p->second.is_incomplete())
+    if (should_ignore_info(p))
       continue;
     if (best == infos.end()) {
       best = p;
@@ -1510,6 +1560,20 @@ map<pg_shard_t, pg_info_t>::const_iterator PeeringState::find_best_info(
       if (p->second.last_update < best->second.last_update) {
 	best = p;
 	continue;
+      }
+    } 
+
+    if (pool.info.require_rollback()) { 
+      if (ec_recovrty_to_lu == eversion_t::max()) {
+        if (p->second.last_update > best->second.last_update)
+	        continue;
+        if (p->second.last_update < best->second.last_update) {
+	        best = p;
+	        continue;
+        }
+      } else if (ec_recovrty_to_lu == p->second.last_update) {
+          best = p;
+          continue;
       }
     } else {
       if (p->second.last_update < best->second.last_update)
@@ -1888,6 +1952,8 @@ void PeeringState::choose_async_recovery_ec(
         shard_info.stats.stats.sum.num_objects_missing;
       if (auth_version > candidate_version) {
         approx_missing_objects += auth_version - candidate_version;
+      } else {
+        approx_missing_objects += candidate_version - auth_version;
       }
       if (static_cast<uint64_t>(approx_missing_objects) >
          cct->_conf.get_val<uint64_t>("osd_async_recovery_min_cost")) {
@@ -2027,7 +2093,13 @@ bool PeeringState::choose_acting(pg_shard_t &auth_log_shard_id,
 				       history_les_bound);
 
   if (auth_log_shard == all_info.end()) {
-    if (up != acting) {
+    if (pool.info.is_erasure()) {
+      psdout(10) << __func__ 
+                 << " not enough shards for erasure pool to recovery"
+                 << dendl;
+      want_acting.clear();
+    }
+    else if (up != acting) {
       psdout(10) << __func__ << " no suitable info found (incomplete backfills?),"
 		 << " reverting to up" << dendl;
       want_acting = up;
