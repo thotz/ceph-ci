@@ -1495,6 +1495,7 @@ map<pg_shard_t, pg_info_t>::const_iterator PeeringState::find_best_info(
       // Disqualify anyone who is incomplete (not fully backfilled)
       if (info->second.is_incomplete())
         return true;
+      return false;
     };
 
   auto best = infos.end();
