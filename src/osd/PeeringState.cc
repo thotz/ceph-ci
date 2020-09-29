@@ -1538,6 +1538,8 @@ map<pg_shard_t, pg_info_t>::const_iterator PeeringState::find_best_info(
       if (!should_rollback && !can_recoverable)
         return infos.end();
       else if (can_recoverable) {
+        psdout(10) << __func__ << " found most recenetly info which can recovery "
+                   << i->first << dendl;
         ec_recovrty_to_lu = i->first;
         break;
       }
@@ -1554,16 +1556,6 @@ map<pg_shard_t, pg_info_t>::const_iterator PeeringState::find_best_info(
       best = p;
       continue;
     }
-    // Prefer newer last_update
-    if (pool.info.require_rollback()) {
-      if (p->second.last_update > best->second.last_update)
-	continue;
-      if (p->second.last_update < best->second.last_update) {
-	best = p;
-	continue;
-      }
-    } 
-
     if (pool.info.require_rollback()) { 
       if (ec_recovrty_to_lu == eversion_t::max()) {
         if (p->second.last_update > best->second.last_update)
