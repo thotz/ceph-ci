@@ -185,14 +185,14 @@ class CephFSTestCase(CephTestCase):
             for i in range(0, self.CLIENTS_REQUIRED):
                 self.mounts[i].mount_wait()
 
-        if self.REQUIRE_BACKUP_FILESYSTEM:
-            if not self.REQUIRE_FILESYSTEM:
-                self.skipTest("backup filesystem requires a primary filesystem as well")
-            self.fs.mon_manager.raw_cluster_cmd('fs', 'flag', 'set',
-                                                'enable_multiple', 'true',
-                                                '--yes-i-really-mean-it')
-            self.backup_fs = self.mds_cluster.newfs(name="backup_fs")
-            self.fs.wait_for_daemons()
+        #if self.REQUIRE_BACKUP_FILESYSTEM:
+        #    if not self.REQUIRE_FILESYSTEM:
+        #        self.skipTest("backup filesystem requires a primary filesystem as well")
+        #    self.fs.mon_manager.raw_cluster_cmd('fs', 'flag', 'set',
+        #                                        'enable_multiple', 'true',
+        #                                        '--yes-i-really-mean-it')
+        #    self.backup_fs = self.mds_cluster.newfs(name="backup_fs")
+        #    self.fs.wait_for_daemons()
 
         if self.REQUIRE_RECOVERY_FILESYSTEM:
             if not self.REQUIRE_FILESYSTEM:
