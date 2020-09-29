@@ -1009,7 +1009,7 @@ void PrimaryLogPG::do_command(
     f->close_section();
 
     if (is_primary() && is_active()) {
-      scrubber.dump(f.get());
+      // RRR fix ! m_scrubber->dump(f.get());
     }
 
     f->open_object_section("agent_state");
@@ -1597,14 +1597,14 @@ int PrimaryLogPG::do_scrub_ls(const MOSDOp *m, OSDOp *osd_op)
   if (arg.interval != 0 && arg.interval != info.history.same_interval_since) {
     r = -EAGAIN;
   } else {
-    bool store_queried = static_cast<PrimaryLogScrub*>(scrubber_.get())->get_store_errors(
+    bool store_queried = static_cast<PrimaryLogScrub*>(m_scrubber.get())->get_store_errors(
                                arg, result);
     if (!store_queried) {
       // the scrubber's store is not initialized
       r = -ENOENT;
     }
   }
-  encode(result, osd_op->outdata); // RRR really? event if no store_?
+  encode(result, osd_op->outdata); // RRR really? event if no store?
 
   return r;
 }
@@ -1631,7 +1631,7 @@ void PrimaryLogPG::release_object_locks(
   if (!to_req.empty()) {
     // requeue at front of scrub blocking queue if we are blocked by scrub
     for (auto &&p: to_req) {
-      if (scrubber_->write_blocked_by_scrub(p.first->obs.oi.soid.get_head())) {
+      if (m_scrubber->write_blocked_by_scrub(p.first->obs.oi.soid.get_head())) {
         for (auto& op : p.second) {
           op->mark_delayed("waiting for scrub");
         }
@@ -1674,7 +1674,7 @@ PrimaryLogPG::PrimaryLogPG(OSDService *o, OSDMapRef curmap,
     pgbackend->get_is_recoverable_predicate());
   snap_trimmer_machine.initiate();
 
-  scrubber_ = make_unique<PrimaryLogScrub>(this);
+  m_scrubber = make_unique<PrimaryLogScrub>(this);
 }
 
 void PrimaryLogPG::get_src_oloc(const object_t& oid, const object_locator_t& oloc, object_locator_t& src_oloc)
@@ -1839,16 +1839,16 @@ void PrimaryLogPG::do_request(
       auto m = op->get_req<MOSDScrubReserve>();
       switch (m->type) {
       case MOSDScrubReserve::REQUEST:
-	scrubber_->handle_scrub_reserve_request(op);
+	m_scrubber->handle_scrub_reserve_request(op);
 	break;
       case MOSDScrubReserve::GRANT:
-	scrubber_->handle_scrub_reserve_grant(op, m->from);
+	m_scrubber->handle_scrub_reserve_grant(op, m->from);
 	break;
       case MOSDScrubReserve::REJECT:
-	scrubber_->handle_scrub_reserve_reject(op, m->from);
+	m_scrubber->handle_scrub_reserve_reject(op, m->from);
 	break;
       case MOSDScrubReserve::RELEASE:
-	scrubber_->handle_scrub_reserve_release(op);
+	m_scrubber->handle_scrub_reserve_release(op);
 	break;
       }
     }
@@ -2100,7 +2100,7 @@ void PrimaryLogPG::do_op(OpRequestRef& op)
       return;
     }
 
-    if (scrubber_->is_chunky_scrub_active() && scrubber_->write_blocked_by_scrub(head)) {
+    if (m_scrubber->is_chunky_scrub_active() && m_scrubber->write_blocked_by_scrub(head)) {
       dout(20) << __func__ << ": waiting for scrub" << dendl;
       waiting_for_scrub.push_back(op);
       op->mark_delayed("waiting for scrub");
@@ -2464,7 +2464,7 @@ PrimaryLogPG::cache_result_t PrimaryLogPG::maybe_handle_manifest_detail(
 	return cache_result_t::BLOCKED_RECOVERY;
       }
 
-      if (scrubber_->write_blocked_by_scrub(head)) {
+      if (m_scrubber->write_blocked_by_scrub(head)) {
 	dout(20) << __func__ << ": waiting for scrub" << dendl;
 	waiting_for_scrub.push_back(op);
 	op->mark_delayed("waiting for scrub");
@@ -3761,7 +3761,7 @@ void PrimaryLogPG::promote_object(ObjectContextRef obc,
 {
   hobject_t hoid = obc ? obc->obs.oi.soid : missing_oid;
   ceph_assert(hoid != hobject_t());
-  if (scrubber_->write_blocked_by_scrub(hoid)) {
+  if (m_scrubber->write_blocked_by_scrub(hoid)) {
     dout(10) << __func__ << " " << hoid
 	     << " blocked by scrub" << dendl;
     if (op) {
@@ -8628,7 +8628,7 @@ void PrimaryLogPG::apply_stats(
     }
   }
 
-  scrubber_->add_stats_if_lower(delta_stats, soid);
+  m_scrubber->add_stats_if_lower(delta_stats, soid);
 }
 
 void PrimaryLogPG::complete_read_ctx(int result, OpContext *ctx)
@@ -10265,7 +10265,7 @@ int PrimaryLogPG::try_flush_mark_clean(FlushOpRef fop)
   }
 
   if (!fop->blocking &&
-      scrubber_->write_blocked_by_scrub(oid)) {
+      m_scrubber->write_blocked_by_scrub(oid)) {
     if (fop->op) {
       dout(10) << __func__ << " blocked by scrub" << dendl;
       requeue_op(fop->op);
@@ -10483,7 +10483,7 @@ void PrimaryLogPG::op_applied(const eversion_t &applied_version)
   ceph_assert(applied_version <= info.last_update);
   recovery_state.local_write_applied(applied_version);
 
-  if (is_primary() && scrubber_->should_requeue_blocked_ops(recovery_state.get_last_update_applied())) {
+  if (is_primary() && m_scrubber->should_requeue_blocked_ops(recovery_state.get_last_update_applied())) {
     osd->queue_scrub_applied_update(this, is_scrub_blocking_ops());
   }
 }
@@ -10911,11 +10911,11 @@ void PrimaryLogPG::handle_watch_timeout(WatchRef watch)
     return;
   }
 
-  if (scrubber_->write_blocked_by_scrub(obc->obs.oi.soid)) {
+  if (m_scrubber->write_blocked_by_scrub(obc->obs.oi.soid)) {
     dout(10) << "handle_watch_timeout waiting for scrub on obj "
 	     << obc->obs.oi.soid
 	     << dendl;
-    scrubber_->add_callback(
+    m_scrubber->add_callback(
       watch->get_delayed_cb() // This callback!
       );
     return;
@@ -11616,24 +11616,24 @@ void PrimaryLogPG::_applied_recovered_object(ObjectContextRef obc)
   --active_pushes;
 
   // requeue an active chunky scrub waiting on recovery ops
-  if (!recovery_state.is_deleting() && active_pushes == 0 && scrubber_->is_scrub_active()) {
+  if (!recovery_state.is_deleting() && active_pushes == 0 && m_scrubber->is_scrub_active()) {
 
-    scrubber_->queue_pushes_update(ops_blocked_by_scrub());
+    m_scrubber->queue_pushes_update(ops_blocked_by_scrub());
   }
 }
 
 void PrimaryLogPG::_applied_recovered_object_replica()
 {
-  dout(7 /*20*/) << __func__ << " ap: " << active_pushes << " prio: " << (bool)scrubber_->replica_op_priority() << dendl;
+  dout(7 /*20*/) << __func__ << " ap: " << active_pushes << " prio: " << (bool)m_scrubber->replica_op_priority() << dendl;
   ceph_assert(active_pushes >= 1); // RRR \todo verify we won't get here with active_pushes==0
                                    // after is_deleting() is cleared.
   --active_pushes;
 
   // requeue an active chunky scrub waiting on recovery ops
   if (!recovery_state.is_deleting() && active_pushes == 0 &&
-      scrubber_->is_scrub_active()) {
+      m_scrubber->is_scrub_active()) {
 
-    scrubber_->queue_pushes_update(scrubber_->replica_op_priority());
+    m_scrubber->queue_pushes_update(m_scrubber->replica_op_priority());
   }
 }
 
@@ -12042,10 +12042,10 @@ void PrimaryLogPG::on_shutdown()
     osd->clear_queued_recovery(this);
   }
 
-  scrubber_->scrub_clear_state();
-  planned_scrub_ = requested_scrub_t{};
+  m_scrubber->scrub_clear_state();
+  m_planned_scrub = requested_scrub_t{};
 
-  scrubber_->unreg_next_scrub();
+  m_scrubber->unreg_next_scrub();
 
   vector<ceph_tid_t> tids;
   cancel_copy_ops(false, &tids);
@@ -12164,7 +12164,7 @@ void PrimaryLogPG::on_change(ObjectStore::Transaction &t)
   requeue_ops(waiting_for_active);
   requeue_ops(waiting_for_readable);
 
-  scrubber_->clear_scrub_reservations();
+  m_scrubber->clear_scrub_reservations();
 
   vector<ceph_tid_t> tids;
   cancel_copy_ops(is_primary(), &tids);
@@ -12194,7 +12194,7 @@ void PrimaryLogPG::on_change(ObjectStore::Transaction &t)
   }
 
   // requeues waiting_for_scrub
-  scrubber_->scrub_clear_state();
+  m_scrubber->scrub_clear_state();
 
   for (auto p = waiting_for_blocked_object.begin();
        p != waiting_for_blocked_object.end();
@@ -12237,7 +12237,7 @@ void PrimaryLogPG::on_change(ObjectStore::Transaction &t)
   context_registry_on_change();
 
   pgbackend->on_change_cleanup(&t);
-  scrubber_->cleanup_store(&t);
+  m_scrubber->cleanup_store(&t);
   pgbackend->on_change();
 
   // clear snap_trimmer state
@@ -12289,7 +12289,7 @@ void PrimaryLogPG::_clear_recovery_state()
 #ifdef DEBUG_RECOVERY_OIDS
   recovering_oids.clear();
 #endif
-  dout(10) << __func__ << " flags: " << planned_scrub_ << dendl;
+  dout(10) << __func__ << " flags: " << m_planned_scrub << dendl;
 
   last_backfill_started = hobject_t();
   set<hobject_t>::iterator i = backfills_in_flight.begin();
@@ -13562,7 +13562,7 @@ void PrimaryLogPG::hit_set_remove_all()
     // Once we hit a degraded object just skip
     if (is_degraded_or_backfilling_object(aoid))
       return;
-    if (scrubber_->write_blocked_by_scrub(aoid))
+    if (m_scrubber->write_blocked_by_scrub(aoid))
       return;
   }
 
@@ -13682,7 +13682,7 @@ void PrimaryLogPG::hit_set_persist()
     // Once we hit a degraded object just skip further trim
     if (is_degraded_or_backfilling_object(aoid))
       return;
-    if (scrubber_->write_blocked_by_scrub(aoid))
+    if (m_scrubber->write_blocked_by_scrub(aoid))
       return;
   }
 
@@ -13715,7 +13715,7 @@ void PrimaryLogPG::hit_set_persist()
     new_hset.using_gmt);
 
   // If the current object is degraded we skip this persist request
-  if (scrubber_->write_blocked_by_scrub(oid))
+  if (m_scrubber->write_blocked_by_scrub(oid))
     return;
 
   hit_set->seal();
@@ -13962,7 +13962,7 @@ bool PrimaryLogPG::agent_work(int start_max, int agent_flush_quota)
       osd->logger->inc(l_osd_agent_skip);
       continue;
     }
-    if (scrubber_->range_intersects_scrub(obc->obs.oi.soid,
+    if (m_scrubber->range_intersects_scrub(obc->obs.oi.soid,
 			       obc->obs.oi.soid.get_head())) {
       dout(20) << __func__ << " skip (scrubbing) " << obc->obs.oi << dendl;
       osd->logger->inc(l_osd_agent_skip);
@@ -14165,7 +14165,7 @@ bool PrimaryLogPG::agent_maybe_evict(ObjectContextRef& obc, bool after_flush)
     return false;
   }
   // This is already checked by agent_work() which passes after_flush = false
-  if (after_flush && scrubber_->range_intersects_scrub(soid, soid.get_head())) {
+  if (after_flush && m_scrubber->range_intersects_scrub(soid, soid.get_head())) {
       dout(20) << __func__ << " skip (scrubbing) " << obc->obs.oi << dendl;
       return false;
   }
@@ -14591,14 +14591,14 @@ bool PrimaryLogPG::already_complete(eversion_t v)
 
 void PrimaryLogPG::do_replica_scrub_map(OpRequestRef op)
 {
-  dout(10) << __func__ << " is scrub active? " << scrubber_->is_scrub_active() << dendl;
+  dout(10) << __func__ << " is scrub active? " << m_scrubber->is_scrub_active() << dendl;
 
-  if (!scrubber_->is_scrub_active()) {
+  if (!m_scrubber->is_scrub_active()) {
     dout(10) << __func__ << " scrub isn't active" << dendl;
     // RRR ask whether we should op-start here
     return;
   }
-  scrubber_->map_from_replica(op);
+  m_scrubber->map_from_replica(op);
 }
 
 bool PrimaryLogPG::_range_available_for_scrub(
@@ -14685,7 +14685,7 @@ void PrimaryLogPG::SnapTrimmer::log_exit(const char *state_name, utime_t enter_t
 bool PrimaryLogPG::SnapTrimmer::permit_trim() {
   return
     pg->is_clean() &&
-    !pg->scrubber_->is_scrub_active() &&
+    !pg->m_scrubber->is_scrub_active() &&
     !pg->snap_trimq.empty();
 }
 
@@ -14721,7 +14721,7 @@ boost::statechart::result PrimaryLogPG::NotTrimming::react(const KickTrim&)
     ldout(pg->cct, 10) << "NotTrimming not clean or nothing to trim" << dendl;
     return discard_event();
   }
-  if (pg->scrubber_->is_scrub_active()) {
+  if (pg->m_scrubber->is_scrub_active()) {
     ldout(pg->cct, 10) << " scrubbing, will requeue snap_trimmer after" << dendl;
     return transit< WaitScrub >();
   } else {
@@ -14938,7 +14938,7 @@ bool PrimaryLogPG::check_failsafe_full() {
 
 bool PrimaryLogPG::maybe_preempt_replica_scrub(const hobject_t& oid)
 {
-  return scrubber_->write_blocked_by_scrub(oid);
+  return m_scrubber->write_blocked_by_scrub(oid);
 }
 
 void intrusive_ptr_add_ref(PrimaryLogPG *pg) { pg->get("intptr"); }
