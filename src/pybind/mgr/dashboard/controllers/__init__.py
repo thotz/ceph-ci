@@ -11,13 +11,14 @@ import os
 import pkgutil
 import re
 import sys
-import urllib
+from urllib.parse import unquote
 
 from functools import wraps
 
 # pylint: disable=wrong-import-position
 import cherrypy
 
+from ..api.doc import SchemaInput, SchemaType
 from ..security import Scope, Permission
 from ..tools import getargspec, TaskManager, get_request_body_params
 from ..exceptions import ScopeNotValid, PermissionNotValid
@@ -108,7 +109,12 @@ def EndpointDoc(description="", group="", parameters=None, responses=None):  # n
     resp = {}
     if responses:
         for status_code, response_body in responses.items():
-            resp[str(status_code)] = _split_parameters(response_body)
+            schema_input = SchemaInput()
+            schema_input.type = SchemaType.ARRAY if \
+                isinstance(response_body, list) else SchemaType.OBJECT
+            schema_input.params = _split_parameters(response_body)
+
+            resp[str(status_code)] = schema_input
 
     def _wrapper(func):
         func.doc_info = {
@@ -663,7 +669,7 @@ class BaseController(object):
         def inner(*args, **kwargs):
             for key, value in kwargs.items():
                 if isinstance(value, str):
-                    kwargs[key] = urllib.parse.unquote(value)
+                    kwargs[key] = unquote(value)
 
             # Process method arguments.
             params = get_request_body_params(cherrypy.request)
