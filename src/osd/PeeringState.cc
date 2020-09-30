@@ -6715,14 +6715,20 @@ PeeringState::Deleting::Deleting(my_context ctx)
   ps->dirty_info = true;
 
   pl->on_removal(t);
+  do_reclaim = pl->can_do_reclaim();
 }
 
 boost::statechart::result PeeringState::Deleting::react(
   const DeleteSome& evt)
 {
   DECLARE_LOCALS;
-  pl->do_delete_work(context<PeeringMachine>().get_cur_transaction(),
-    start, &next);
+  if (do_reclaim) {
+    pl->do_reclaim_work(context<PeeringMachine>().get_cur_transaction(),
+      start, &next);
+  } else {
+    pl->do_delete_work(context<PeeringMachine>().get_cur_transaction(),
+      start, &next);
+  }
   return discard_event();
 }
 
