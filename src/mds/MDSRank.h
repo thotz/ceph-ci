@@ -156,7 +156,8 @@ class MDSRank {
         MgrClient *mgrc,
         Context *respawn_hook_,
         Context *suicide_hook_,
-	boost::asio::io_context& ioc);
+	boost::asio::io_context& ioc,
+	bool bal_export_pin);
 
     mds_rank_t get_nodeid() const { return whoami; }
     int64_t get_metadata_pool();
@@ -197,6 +198,8 @@ class MDSRank {
     bool is_stopped() const { return mdsmap->is_stopped(whoami); }
     bool is_cluster_degraded() const { return cluster_degraded; }
     bool allows_multimds_snaps() const { return mdsmap->allows_multimds_snaps(); }
+
+    bool get_bal_export_pin() { return bal_export_pin; }
 
     bool is_cache_trimmable() const {
       return is_clientreplay() || is_active() || is_stopping();
@@ -560,6 +563,8 @@ class MDSRank {
     map<mds_rank_t, MDSContext::vec > waiting_for_active_peer;
     map<epoch_t, MDSContext::vec > waiting_for_mdsmap;
 
+    bool bal_export_pin;
+
     epoch_t osd_epoch_barrier = 0;
 
     // Const reference to the beacon so that we can behave differently
@@ -645,7 +650,8 @@ public:
       MgrClient *mgrc,
       Context *respawn_hook_,
       Context *suicide_hook_,
-      boost::asio::io_context& ioc);
+      boost::asio::io_context& ioc,
+      bool bal_export_pin);
 
   void init();
   void tick();

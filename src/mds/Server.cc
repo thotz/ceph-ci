@@ -252,6 +252,7 @@ Server::Server(MDSRank *m, MetricsHandler *metrics_handler) :
   cap_revoke_eviction_timeout = g_conf().get_val<double>("mds_cap_revoke_eviction_timeout");
   max_snaps_per_dir = g_conf().get_val<uint64_t>("mds_max_snaps_per_dir");
   delegate_inos_pct = g_conf().get_val<uint64_t>("mds_client_delegate_inos_pct");
+  bal_fragment_size_max = g_conf().get_val<int64_t>("mds_bal_fragment_size_max");
   supported_features = feature_bitset_t(CEPHFS_FEATURES_MDS_SUPPORTED);
 }
 
@@ -1196,6 +1197,9 @@ void Server::handle_conf_change(const std::set<std::string>& changed) {
   }
   if (changed.count("mds_client_delegate_inos_pct")) {
     delegate_inos_pct = g_conf().get_val<uint64_t>("mds_client_delegate_inos_pct");
+  }
+  if (changed.count("mds_bal_fragment_size_max")) {
+    bal_fragment_size_max = g_conf().get_val<int64_t>("mds_bal_fragment_size_max");
   }
 }
 
@@ -3136,8 +3140,8 @@ bool Server::check_access(MDRequestRef& mdr, CInode *in, unsigned mask)
 bool Server::check_fragment_space(MDRequestRef &mdr, CDir *in)
 {
   const auto size = in->get_frag_size();
-  if (size >= g_conf()->mds_bal_fragment_size_max) {
-    dout(10) << "fragment " << *in << " size exceeds " << g_conf()->mds_bal_fragment_size_max << " (ENOSPC)" << dendl;
+  if (size >= bal_fragment_size_max) {
+    dout(10) << "fragment " << *in << " size exceeds " << bal_fragment_size_max << " (ENOSPC)" << dendl;
     respond_to_request(mdr, -ENOSPC);
     return false;
   }
