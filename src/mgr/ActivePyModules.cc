@@ -1066,9 +1066,7 @@ PyObject *ActivePyModules::get_osd_perf_counters(MetricQueryID query_id)
   const std::map<OSDPerfMetricKey, PerformanceCounters> &counters = collector.counters;
 
   f.open_array_section("counters");
-  for (auto &it : counters) {
-    auto &key = it.first;
-    auto  &instance_counters = it.second;
+  for (auto &[key, instance_counters] : counters) {
     f.open_object_section("i");
     f.open_array_section("k");
     for (auto &sub_key : key) {
@@ -1130,9 +1128,7 @@ PyObject *ActivePyModules::get_mds_perf_counters(MetricQueryID query_id)
   f.close_section(); // delayed_ranks
 
   f.open_array_section("counters");
-  for (auto &it : counters) {
-    auto &key = it.first;
-    auto  &instance_counters = it.second;
+  for (auto &[key, instance_counters] : counters) {
     f.open_object_section("i");
     f.open_array_section("k");
     for (auto &sub_key : key) {

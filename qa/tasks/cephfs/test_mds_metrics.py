@@ -4,31 +4,10 @@ import time
 import random
 import logging
 
+from teuthology.contextutil import safe_while
 from tasks.cephfs.cephfs_test_case import CephFSTestCase
 
 log = logging.getLogger(__name__)
-
-def verify_mds_metrics(fs, active_mds_count=1, client_count=1):
-    def verify_metrics_cbk(metrics):
-        mds_metrics = metrics['metrics']
-        if not len(mds_metrics) == active_mds_count + 1: # n active mdss + delayed set
-            return False
-        fs_status = fs.status()
-        ranks = set([info['rank'] for info in fs_status.get_ranks(fs.id)])
-        for rank in ranks:
-            r = mds_metrics.get("mds.{}".format(rank), None)
-            if not r or not len(mds_metrics['delayed_ranks']) == 0:
-                return False
-        global_metrics = metrics['global_metrics']
-        client_metadata = metrics['client_metadata']
-        for client in list(client_metadata.keys()):
-            if client_metadata[client]['mount_point'] == "N/A":
-                del client_metadata[client]
-                del global_metrics[client]
-        if not len(global_metrics) == client_count or not len(client_metadata) == client_count:
-            return False
-        return True
-    return verify_metrics_cbk
 
 class TestMDSMetrics(CephFSTestCase):
     CLIENTS_REQUIRED = 2
@@ -49,6 +28,30 @@ class TestMDSMetrics(CephFSTestCase):
         curr_max_mds = self.fs.get_var('max_mds')
         if curr_max_mds > 1:
             self.fs.shrink(1)
+
+    def verify_mds_metrics(self, active_mds_count=1, client_count=1, ranks=[]):
+        def verify_metrics_cbk(metrics):
+            mds_metrics = metrics['metrics']
+            if not len(mds_metrics) == active_mds_count + 1: # n active mdss + delayed set
+                return False
+            fs_status = self.fs.status()
+            nonlocal ranks
+            if not ranks:
+                ranks = set([info['rank'] for info in fs_status.get_ranks(self.fs.id)])
+            for rank in ranks:
+                r = mds_metrics.get("mds.{}".format(rank), None)
+                if not r or not len(mds_metrics['delayed_ranks']) == 0:
+                    return False
+            global_metrics = metrics['global_metrics']
+            client_metadata = metrics['client_metadata']
+            for client in list(client_metadata.keys()):
+                if client_metadata[client]['mount_point'] == "N/A":
+                    del client_metadata[client]
+                    del global_metrics[client]
+            if not len(global_metrics) == client_count or not len(client_metadata) == client_count:
+                return False
+            return True
+        return verify_metrics_cbk
 
     def _fs_perf_stats(self, *args):
         return self.mgr_cluster.mon_manager.raw_cluster_cmd("fs", "perf", "stats", *args)
@@ -91,12 +94,12 @@ class TestMDSMetrics(CephFSTestCase):
     def _get_metrics(self, verifier_callback, trials, *args):
         metrics = None
         done = False
-        while not done and trials > 0:
-            metrics = json.loads(self._fs_perf_stats(*args))
-            done = verifier_callback(metrics)
-            time.sleep(1)
-            trials -= 1
-        # return last fetched metric for examination
+        with safe_while(sleep=1, tries=trials, action='wait for metrics') as proceed:
+            while proceed():
+                metrics = json.loads(self._fs_perf_stats(*args))
+                done = verifier_callback(metrics)
+                if done:
+                    break
         return done, metrics
 
     # basic check to verify if we get back metrics from each active mds rank
@@ -104,28 +107,28 @@ class TestMDSMetrics(CephFSTestCase):
     def test_metrics_from_rank(self):
         # validate
         valid, metrics = self._get_metrics(
-            verify_mds_metrics(self.fs, client_count=TestMDSMetrics.CLIENTS_REQUIRED), 30)
+            self.verify_mds_metrics(client_count=TestMDSMetrics.CLIENTS_REQUIRED), 30)
         log.debug("metrics={0}".format(metrics))
         self.assertTrue(valid)
 
     def test_metrics_post_client_disconnection(self):
         # validate
         valid, metrics = self._get_metrics(
-            verify_mds_metrics(self.fs, client_count=TestMDSMetrics.CLIENTS_REQUIRED), 30)
+            self.verify_mds_metrics(client_count=TestMDSMetrics.CLIENTS_REQUIRED), 30)
         log.debug("metrics={0}".format(metrics))
         self.assertTrue(valid)
 
         self.mount_a.umount_wait()
 
         valid, metrics = self._get_metrics(
-            verify_mds_metrics(self.fs, client_count=TestMDSMetrics.CLIENTS_REQUIRED - 1), 30)
+            self.verify_mds_metrics(client_count=TestMDSMetrics.CLIENTS_REQUIRED - 1), 30)
         log.debug("metrics={0}".format(metrics))
         self.assertTrue(valid)
 
     def test_metrics_mds_grow(self):
         # validate
         valid, metrics = self._get_metrics(
-            verify_mds_metrics(self.fs, client_count=TestMDSMetrics.CLIENTS_REQUIRED), 30)
+            self.verify_mds_metrics(client_count=TestMDSMetrics.CLIENTS_REQUIRED), 30)
         log.debug("metrics={0}".format(metrics))
         self.assertTrue(valid)
 
@@ -143,8 +146,8 @@ class TestMDSMetrics(CephFSTestCase):
         time.sleep(5)
 
         # validate
-        valid, metrics = self._get_metrics(verify_mds_metrics(
-            self.fs, active_mds_count=2, client_count=TestMDSMetrics.CLIENTS_REQUIRED) , 30)
+        valid, metrics = self._get_metrics(self.verify_mds_metrics(
+            active_mds_count=2, client_count=TestMDSMetrics.CLIENTS_REQUIRED) , 30)
         log.debug("metrics={0}".format(metrics))
         self.assertTrue(valid)
 
@@ -154,7 +157,7 @@ class TestMDSMetrics(CephFSTestCase):
     def test_metrics_mds_grow_and_shrink(self):
         # validate
         valid, metrics = self._get_metrics(
-            verify_mds_metrics(self.fs, client_count=TestMDSMetrics.CLIENTS_REQUIRED), 30)
+            self.verify_mds_metrics(client_count=TestMDSMetrics.CLIENTS_REQUIRED), 30)
         log.debug("metrics={0}".format(metrics))
         self.assertTrue(valid)
 
@@ -173,7 +176,7 @@ class TestMDSMetrics(CephFSTestCase):
 
         # validate
         valid, metrics = self._get_metrics(
-            verify_mds_metrics(self.fs, active_mds_count=2, client_count=TestMDSMetrics.CLIENTS_REQUIRED), 30)
+            self.verify_mds_metrics(active_mds_count=2, client_count=TestMDSMetrics.CLIENTS_REQUIRED), 30)
         log.debug("metrics={0}".format(metrics))
         self.assertTrue(valid)
 
@@ -185,7 +188,7 @@ class TestMDSMetrics(CephFSTestCase):
 
         # validate
         valid, metrics = self._get_metrics(
-            verify_mds_metrics(self.fs, client_count=TestMDSMetrics.CLIENTS_REQUIRED), 30)
+            self.verify_mds_metrics(client_count=TestMDSMetrics.CLIENTS_REQUIRED), 30)
         log.debug("metrics={0}".format(metrics))
         self.assertTrue(valid)
 
@@ -195,7 +198,7 @@ class TestMDSMetrics(CephFSTestCase):
     def test_delayed_metrics(self):
         # validate
         valid, metrics = self._get_metrics(
-            verify_mds_metrics(self.fs, client_count=TestMDSMetrics.CLIENTS_REQUIRED), 30)
+            self.verify_mds_metrics(client_count=TestMDSMetrics.CLIENTS_REQUIRED), 30)
         log.debug("metrics={0}".format(metrics))
         self.assertTrue(valid)
 
@@ -214,7 +217,7 @@ class TestMDSMetrics(CephFSTestCase):
 
         # validate
         valid, metrics = self._get_metrics(
-            verify_mds_metrics(self.fs, active_mds_count=2, client_count=TestMDSMetrics.CLIENTS_REQUIRED), 30)
+            self.verify_mds_metrics(active_mds_count=2, client_count=TestMDSMetrics.CLIENTS_REQUIRED), 30)
         log.debug("metrics={0}".format(metrics))
         self.assertTrue(valid)
 
@@ -240,7 +243,7 @@ class TestMDSMetrics(CephFSTestCase):
 
         # validate
         valid, metrics = self._get_metrics(
-            verify_mds_metrics(self.fs, active_mds_count=2, client_count=TestMDSMetrics.CLIENTS_REQUIRED), 30)
+            self.verify_mds_metrics(active_mds_count=2, client_count=TestMDSMetrics.CLIENTS_REQUIRED), 30)
         log.debug("metrics={0}".format(metrics))
         self.assertTrue(valid)
 
@@ -250,7 +253,7 @@ class TestMDSMetrics(CephFSTestCase):
     def test_query_mds_filter(self):
         # validate
         valid, metrics = self._get_metrics(
-            verify_mds_metrics(self.fs, client_count=TestMDSMetrics.CLIENTS_REQUIRED), 30)
+            self.verify_mds_metrics(client_count=TestMDSMetrics.CLIENTS_REQUIRED), 30)
         log.debug("metrics={0}".format(metrics))
         self.assertTrue(valid)
 
@@ -269,75 +272,41 @@ class TestMDSMetrics(CephFSTestCase):
 
         # validate
         valid, metrics = self._get_metrics(
-            verify_mds_metrics(self.fs, active_mds_count=2, client_count=TestMDSMetrics.CLIENTS_REQUIRED), 30)
+            self.verify_mds_metrics(active_mds_count=2, client_count=TestMDSMetrics.CLIENTS_REQUIRED), 30)
         log.debug("metrics={0}".format(metrics))
         self.assertTrue(valid)
 
         # initiate a new query with `--mds_rank` filter and validate if
         # we get metrics *only* from that mds.
         filtered_mds = 1
-        client_count = TestMDSMetrics.CLIENTS_REQUIRED
-        def verify_filtered_metrics_mds(metrics):
-            mds_metrics = metrics['metrics']
-            if not len(mds_metrics) == 2: # filtered mds + delayed set
-                return False
-            r = mds_metrics.get("mds.{}".format(filtered_mds), None)
-            if not r or not len(mds_metrics['delayed_ranks']) == 0:
-                return False
-        global_metrics = metrics['global_metrics']
-        client_metadata = metrics['client_metadata']
-        for client in list(client_metadata.keys()):
-            if client_metadata[client]['mount_point'] == "N/A":
-                del client_metadata[client]
-                del global_metrics[client]
-        if not len(global_metrics) == client_count or not len(client_metadata) == client_count:
-            return False
-        return True
         valid, metrics = self._get_metrics(
-            verify_filtered_metrics_mds, 30, '--mds_rank={}'.format(filtered_mds))
+            self.verify_mds_metrics(client_count=TestMDSMetrics.CLIENTS_REQUIRED,
+                                    ranks=[filtered_mds]), 30, '--mds_rank={}'.format(filtered_mds))
         log.debug("metrics={0}".format(metrics))
         self.assertTrue(valid)
 
     def test_query_client_filter(self):
         # validate
         valid, metrics = self._get_metrics(
-            verify_mds_metrics(self.fs, client_count=TestMDSMetrics.CLIENTS_REQUIRED), 30)
+            self.verify_mds_metrics(client_count=TestMDSMetrics.CLIENTS_REQUIRED), 30)
         log.debug("metrics={0}".format(metrics))
         self.assertTrue(valid)
 
         mds_metrics = metrics['metrics']
-
         # pick an random client
         client = random.choice(list(mds_metrics['mds.0'].keys()))
         # could have used regex to extract client id
         client_id = (client.split(' ')[0]).split('.')[-1]
 
-        fscid = self.fs.id
-        def verify_filtered_metrics_client(metrics):
-            mds_metrics = metrics['metrics']
-            if not len(mds_metrics) == 2: # 1 active mds + delayed set
-                return False
-            fs_status = self.fs.status()
-            r = mds_metrics.get("mds.0", None)
-            if not r or not len(mds_metrics['delayed_ranks']) == 0:
-                return False
-            if not len(r) == 1 and not client in r:
-                return False
-            global_metrics = metrics['global_metrics']
-            client_metadata = metrics['client_metadata']
-            if not len(global_metrics) == 1 or not client in global_metrics:
-                return False
-            if not len(client_metadata) == 1 or not client in client_metadata:
-                return False
-            return True
-        valid, metrics = self._get_metrics(verify_filtered_metrics_client, 30, '--client_id={}'.format(client_id))
+        valid, metrics = self._get_metrics(
+            self.verify_mds_metrics(client_count=1), 30, '--client_id={}'.format(client_id))
         log.debug("metrics={0}".format(metrics))
         self.assertTrue(valid)
 
     def test_query_mds_and_client_filter(self):
         # validate
         valid, metrics = self._get_metrics(
-            verify_mds_metrics(self.fs, client_count=TestMDSMetrics.CLIENTS_REQUIRED), 30)
+            self.verify_mds_metrics(client_count=TestMDSMetrics.CLIENTS_REQUIRED), 30)
         log.debug("metrics={0}".format(metrics))
         self.assertTrue(valid)
 
@@ -356,7 +325,7 @@ class TestMDSMetrics(CephFSTestCase):
 
         # validate
         valid, metrics = self._get_metrics(
-            verify_mds_metrics(self.fs, active_mds_count=2, client_count=TestMDSMetrics.CLIENTS_REQUIRED), 30)
+            self.verify_mds_metrics(active_mds_count=2, client_count=TestMDSMetrics.CLIENTS_REQUIRED), 30)
         log.debug("metrics={0}".format(metrics))
         self.assertTrue(valid)
 
@@ -366,26 +335,9 @@ class TestMDSMetrics(CephFSTestCase):
         client = random.choice(list(mds_metrics['mds.1'].keys()))
         # could have used regex to extract client id
         client_id = (client.split(' ')[0]).split('.')[-1]
-
-        fscid = self.fs.id
         filtered_mds = 1
-        def verify_filtered_metrics_mds_and_client(metrics):
-            mds_metrics = metrics['metrics']
-            if not len(mds_metrics) == 2: # filtered mds + delayed set
-                return False
-            r = mds_metrics.get("mds.{}".format(filtered_mds), None)
-            if not r or not len(mds_metrics['delayed_ranks']) == 0:
-                return False
-            if not len(r) == 1 and not client in r:
-                return False
-            global_metrics = metrics['global_metrics']
-            client_metadata = metrics['client_metadata']
-            if not len(global_metrics) == 1 or not client in global_metrics:
-                return False
-            if not len(client_metadata) == 1 or not client in client_metadata:
-                return False
-            return True
-        valid, metrics = self._get_metrics(verify_filtered_metrics_mds_and_client, 30,
-                                           '--mds_rank={}'.format(filtered_mds), '--client_id={}'.format(client_id))
+        valid, metrics = self._get_metrics(
+            self.verify_mds_metrics(client_count=1, ranks=[filtered_mds]),
+            30, '--mds_rank={}'.format(filtered_mds), '--client_id={}'.format(client_id))
         log.debug("metrics={0}".format(metrics))
         self.assertTrue(valid)

@@ -1023,7 +1023,8 @@ ceph_get_osd_perf_counters(BaseMgrModule *self, PyObject *args)
   return self->py_modules->get_osd_perf_counters(query_id);
 }
 
-// MDS perf query interface
+// MDS perf query interface -- mostly follows ceph_add_osd_perf_query()
+// style
 
 static PyObject*
 ceph_add_mds_perf_query(BaseMgrModule *self, PyObject *args)

@@ -1510,14 +1510,14 @@ class Filesystem(MDSCluster):
         return self.mon_manager.raw_cluster_cmd('fs', 'authorize', self.name,
                                                 client_name, *caps)
 
-    def grow(self, new_max_mds):
-        oldmax = self.get_var('max_mds')
+    def grow(self, new_max_mds, status=None):
+        oldmax = self.get_var('max_mds', status=status)
         assert(new_max_mds > oldmax)
         self.set_max_mds(new_max_mds)
         return self.wait_for_daemons()
 
-    def shrink(self, new_max_mds):
-        oldmax = self.get_var('max_mds')
+    def shrink(self, new_max_mds, status=None):
+        oldmax = self.get_var('max_mds', status=status)
         assert(new_max_mds < oldmax)
         self.set_max_mds(new_max_mds)
         return self.wait_for_daemons()
