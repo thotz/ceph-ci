@@ -3675,7 +3675,7 @@ std::string CDir::get_path() const
 bool CDir::should_split_fast() const
 {
   // Max size a fragment can be before trigger fast splitting
-  int fast_limit = g_conf()->mds_bal_split_size * g_conf()->mds_bal_fragment_fast_factor;
+  int fast_limit = g_conf().get_val<int64_t>("mds_bal_split_size") * g_conf().get_val<double>("mds_bal_fragment_fast_factor");
 
   // Fast path: the sum of accounted size and null dentries does not
   // exceed threshold: we definitely are not over it.
