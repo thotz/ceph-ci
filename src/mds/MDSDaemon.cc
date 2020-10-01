@@ -750,7 +750,7 @@ void MDSDaemon::handle_mds_map(const cref_t<MMDSMap> &m)
           timer, beacon, mdsmap, messenger, monc, &mgrc,
           new LambdaContext([this](int r){respawn();}),
           new LambdaContext([this](int r){suicide();}),
-	  ioctx);
+          ioctx);
       dout(10) <<  __func__ << ": initializing MDS rank "
                << mds_rank->get_nodeid() << dendl;
       mds_rank->init();
