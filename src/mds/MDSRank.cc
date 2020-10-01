@@ -487,6 +487,7 @@ MDSRank::MDSRank(
     MgrClient *mgrc,
     Context *respawn_hook_,
     Context *suicide_hook_,
+    bool bal_export_pin,
     boost::asio::io_context& ioc) :
     cct(msgr->cct), mds_lock(mds_lock_), clog(clog_),
     timer(timer_), mdsmap(mdsmap_),
@@ -508,6 +509,7 @@ MDSRank::MDSRank(
     messenger(msgr), monc(monc_), mgrc(mgrc),
     respawn_hook(respawn_hook_),
     suicide_hook(suicide_hook_),
+    bal_export_pin(g_conf().get_val<bool>("mds_bal_export_pin")),
     starttime(mono_clock::now()),
     ioc(ioc)
 {
@@ -647,9 +649,9 @@ void MDSRank::update_targets()
 
 void MDSRank::hit_export_target(mds_rank_t rank, double amount)
 {
-  double rate = g_conf()->mds_bal_target_decay;
+  double rate = g_conf().get_val<double>("mds_bal_target_decay");
   if (amount < 0.0) {
-    amount = 100.0/g_conf()->mds_bal_target_decay; /* a good default for "i am trying to keep this export_target active" */
+    amount = 100.0/rate; /* a good default for "i am trying to keep this export_target active" */
   }
   auto em = export_targets.emplace(std::piecewise_construct, std::forward_as_tuple(rank), std::forward_as_tuple(DecayRate(rate)));
   auto &counter = em.first->second;
@@ -3571,9 +3573,11 @@ MDSRankDispatcher::MDSRankDispatcher(
     MgrClient *mgrc,
     Context *respawn_hook_,
     Context *suicide_hook_,
+    bool bal_export_pin,
     boost::asio::io_context& ioc)
   : MDSRank(whoami_, fs_name_, mds_lock_, clog_, timer_, beacon_, mdsmap_,
-            msgr, monc_, mgrc, respawn_hook_, suicide_hook_, ioc)
+            msgr, monc_, mgrc, respawn_hook_, suicide_hook_, 
+	    g_conf().get_val<bool>("mds_bal_export_pin"), ioc)
 {
     g_conf().add_observer(this);
 }
@@ -3606,6 +3610,15 @@ const char** MDSRankDispatcher::get_tracked_conf_keys() const
     "host",
     "mds_bal_fragment_dirs",
     "mds_bal_fragment_interval",
+    "mds_bal_interval",
+    "mds_bal_max_until",
+    "mds_bal_export_pin",
+    "mds_bal_sample_interval",
+    "mds_bal_split_rd",
+    "mds_bal_split_wr",
+    "mds_bal_replicate_threshold",
+    "mds_bal_unreplicate_threshold",
+    "mds_bal_fragment_size_max",
     "mds_cache_memory_limit",
     "mds_cache_mid",
     "mds_cache_reservation",
@@ -3668,7 +3681,9 @@ void MDSRankDispatcher::handle_conf_change(const ConfigProxy& conf, const std::s
       changed.count("fsid")) {
     update_log_config();
   }
-
+  if (changed.count("mds_bal_export_pin")) {
+    bal_export_pin = g_conf().get_val<bool>("mds_bal_export_pin");
+  }
   finisher->queue(new LambdaContext([this, changed](int) {
     std::scoped_lock lock(mds_lock);
 

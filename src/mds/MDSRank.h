@@ -167,6 +167,7 @@ class MDSRank {
         MgrClient *mgrc,
         Context *respawn_hook_,
         Context *suicide_hook_,
+	bool bal_export_pin,
 	boost::asio::io_context& ioc);
 
     mds_rank_t get_nodeid() const { return whoami; }
@@ -209,6 +210,8 @@ class MDSRank {
     bool is_stopped() const { return mdsmap->is_stopped(whoami); }
     bool is_cluster_degraded() const { return cluster_degraded; }
     bool allows_multimds_snaps() const { return mdsmap->allows_multimds_snaps(); }
+
+    bool get_bal_export_pin() { return bal_export_pin; }
 
     bool is_cache_trimmable() const {
       return is_clientreplay() || is_active() || is_stopping();
@@ -589,6 +592,8 @@ class MDSRank {
     Context *respawn_hook;
     Context *suicide_hook;
 
+    bool bal_export_pin;
+
     bool standby_replaying = false;  // true if current replay pass is in standby-replay mode
 private:
     bool send_status = true;
@@ -656,6 +661,7 @@ public:
       MgrClient *mgrc,
       Context *respawn_hook_,
       Context *suicide_hook_,
+      bool bal_export_pin,
       boost::asio::io_context& ioc);
 
   void init();
