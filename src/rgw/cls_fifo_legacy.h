@@ -127,8 +127,8 @@ class FIFO {
   std::optional<marker> to_marker(std::string_view s);
 
   FIFO(lr::IoCtx&& ioc,
-       std::string oid)
-    : ioctx(std::move(ioc)), oid(oid) {}
+       const std::string& _oid)
+    : ioctx(std::move(ioc)), oid(_oid) {}
 
   std::string generate_tag() const;
 
