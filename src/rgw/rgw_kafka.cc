@@ -107,7 +107,7 @@ struct connection_t {
   // ctor for setting immutable values
   connection_t(CephContext* _cct, const std::string& _broker, bool _use_ssl, bool _verify_ssl, 
           const boost::optional<const std::string&>& _ca_location,
-          const std::string& _user, const std::string& _password) :
+          const std::string& _user, const std::string& _password) : status(STATUS_OK),
       cct(_cct), broker(_broker), use_ssl(_use_ssl), verify_ssl(_verify_ssl), ca_location(_ca_location), user(_user), password(_password) {}
 
   // dtor also destroys the internals
@@ -371,6 +371,7 @@ private:
       }
       conn->destroy(err);
       delete tag;
+      return;
     }
    
     if (tag) {
