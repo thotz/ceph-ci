@@ -68,7 +68,7 @@ function munge_debian_control {
 }
 
 function ensure_decent_gcc_on_ubuntu {
-    # point gcc to the one offered by g++-7 if the used one is not
+    # point gcc to the one offered by g++-9 if the used one is not
     # new enough
     local old=$(gcc -dumpfullversion -dumpversion)
     local new=$1
@@ -289,7 +289,7 @@ else
                 [ ! $NO_BOOST_PKGS ] && apt-get install -y libboost1.67-all-dev
                 ;;
             *)
-                $SUDO apt-get install -y gcc
+                $SUDO apt-get install -y gcc-9
                 ;;
         esac
         if ! test -r debian/control ; then
