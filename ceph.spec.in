@@ -138,7 +138,7 @@ BuildRequires:	fuse-devel
 %if 0%{with seastar}
 BuildRequires:	gcc-toolset-9-gcc-c++ >= 9.2.1-2.3
 %else
-BuildRequires:	gcc-c++
+BuildRequires:	gcc-c++ >= 9.0
 %endif
 BuildRequires:	gdbm
 %if 0%{with tcmalloc}
