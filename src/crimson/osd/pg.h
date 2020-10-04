@@ -21,9 +21,11 @@
 #include "crimson/osd/object_context.h"
 #include "osd/PeeringState.h"
 
+#include "crimson/common/interruptible_future.h"
 #include "crimson/common/type_helpers.h"
 #include "crimson/os/futurized_collection.h"
 #include "crimson/osd/backfill_state.h"
+#include "crimson/osd/io_interrupt_condition.h"
 #include "crimson/osd/osd_operations/client_request.h"
 #include "crimson/osd/osd_operations/peering_event.h"
 #include "crimson/osd/osd_operations/replicated_request.h"
@@ -78,6 +80,11 @@ class PG : public boost::intrusive_ref_counter<
   seastar::timer<seastar::lowres_clock> renew_lease_timer;
 
 public:
+  template <typename... T>
+  using interruptible_future =
+    ::crimson::interruptible::interruptible_future<
+      ::crimson::osd::IOInterruptCondition, T...>;
+
   PG(spg_t pgid,
      pg_shard_t pg_shard,
      crimson::os::CollectionRef coll_ref,
@@ -490,19 +497,25 @@ public:
 
   using load_obc_ertr = crimson::errorator<
     crimson::ct_error::object_corrupted>;
-  load_obc_ertr::future<
+  using interruptible_load_obc_ertr =
+    ::crimson::interruptible::interruptible_errorator<
+      ::crimson::osd::IOInterruptCondition,
+      load_obc_ertr>;
+  using interruptor = ::crimson::interruptible::interruptor<
+    ::crimson::osd::IOInterruptCondition>;
+  interruptible_load_obc_ertr::future<
     std::pair<crimson::osd::ObjectContextRef, bool>>
   get_or_load_clone_obc(
     hobject_t oid, crimson::osd::ObjectContextRef head_obc);
 
-  load_obc_ertr::future<
+  interruptible_load_obc_ertr::future<
     std::pair<crimson::osd::ObjectContextRef, bool>>
   get_or_load_head_obc(hobject_t oid);
 
-  load_obc_ertr::future<crimson::osd::ObjectContextRef>
+  interruptible_load_obc_ertr::future<crimson::osd::ObjectContextRef>
   load_head_obc(ObjectContextRef obc);
 
-  load_obc_ertr::future<ObjectContextRef> get_locked_obc(
+  interruptible_load_obc_ertr::future<ObjectContextRef> get_locked_obc(
     Operation *op,
     const hobject_t &oid,
     RWState::State type);
@@ -518,15 +531,15 @@ public:
     }
     RWState::State type = get_lock_type(op_info);
     return get_locked_obc(op, get_oid(*m), type)
-      .safe_then([f=std::forward<F>(f), type=type](auto obc) {
-	return f(obc).finally([obc, type=type] {
+      .safe_then_interruptible([f=std::forward<F>(f), type=type](auto obc) {
+	return f(obc).template finally_interruptible<false>([obc, type=type] {
 	  obc->put_lock_type(type);
 	  return load_obc_ertr::now();
 	});
       });
   }
 
-  seastar::future<> handle_rep_op(Ref<MOSDRepOp> m);
+  interruptible_future<> handle_rep_op(Ref<MOSDRepOp> m);
   void handle_rep_op_reply(crimson::net::Connection* conn,
 			   const MOSDRepOpReply& m);
 
@@ -537,11 +550,11 @@ private:
   void do_peering_event(
     const boost::statechart::event_base &evt,
     PeeringCtx &rctx);
-  seastar::future<Ref<MOSDOpReply>> do_osd_ops(
+  interruptible_future<Ref<MOSDOpReply>> do_osd_ops(
     Ref<MOSDOp> m,
     ObjectContextRef obc,
     const OpInfo &op_info);
-  seastar::future<Ref<MOSDOpReply>> do_pg_ops(Ref<MOSDOp> m);
+  interruptible_future<Ref<MOSDOpReply>> do_pg_ops(Ref<MOSDOp> m);
   seastar::future<> do_osd_op(
     ObjectState& os,
     OSDOp& op,
@@ -549,7 +562,7 @@ private:
   seastar::future<ceph::bufferlist> do_pgnls(ceph::bufferlist& indata,
 					     const std::string& nspace,
 					     uint64_t limit);
-  seastar::future<> submit_transaction(const OpInfo& op_info,
+  interruptible_future<> submit_transaction(const OpInfo& op_info,
 				       const std::vector<OSDOp>& ops,
 				       ObjectContextRef&& obc,
 				       ceph::os::Transaction&& txn,
@@ -690,6 +703,8 @@ private:
 
 private:
   BackfillRecovery::BackfillRecoveryPipeline backfill_pipeline;
+
+  friend class IOInterruptCondition;
 };
 
 std::ostream& operator<<(std::ostream&, const PG& pg);

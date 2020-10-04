@@ -41,7 +41,7 @@ protected:
       scheduler_class
     };
   }
-  virtual seastar::future<bool> do_recovery() = 0;
+  virtual interruptible_future<bool> do_recovery() = 0;
 };
 
 class UrgentRecovery final : public BackgroundRecovery {
@@ -59,11 +59,11 @@ public:
 private:
   const hobject_t soid;
   const eversion_t need;
-  seastar::future<bool> do_recovery() override;
+  interruptible_future<bool> do_recovery() override;
 };
 
 class PglogBasedRecovery final : public BackgroundRecovery {
-  seastar::future<bool> do_recovery() override;
+  interruptible_future<bool> do_recovery() override;
 
 public:
   PglogBasedRecovery(
@@ -75,7 +75,7 @@ public:
 class BackfillRecovery final : public BackgroundRecovery {
   boost::intrusive_ptr<const boost::statechart::event_base> evt;
   OrderedPipelinePhase::Handle handle;
-  seastar::future<bool> do_recovery() override;
+  interruptible_future<bool> do_recovery() override;
 
 public:
   class BackfillRecoveryPipeline {
