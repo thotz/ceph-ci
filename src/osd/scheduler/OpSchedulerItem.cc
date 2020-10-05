@@ -23,10 +23,6 @@ void PGOpItem::run(
   PGRef& pg,
   ThreadPool::TPHandle &handle)
 {
-#ifdef WITH_JAEGER
-    auto PGOpItem_span = opentracing::Tracer::Global()->StartSpan(
-      "PGOpItem created" , {opentracing::v3::ChildOf(&(op->osd_parent_span)->context())});
-#endif
   osd->dequeue_op(pg, op, handle);
   pg->unlock();
 }

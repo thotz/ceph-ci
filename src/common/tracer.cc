@@ -1,46 +1,35 @@
 #include "tracer.h"
+#include <arpa/inet.h>
+#include <yaml-cpp/yaml.h>
+#ifdef __linux__
+#include <linux/types.h>
+#else
+typedef int64_t __s64;
+#endif
 
- std::shared_ptr<opentracing::v3::Tracer> jaeger_tracing::tracer = nullptr;
+#include "common/debug.h"
 
- inline void jaeger_tracing::init_tracer(const char* tracerName){
-  try{
-    auto yaml = R"cfg(
-  disabled: false
-  reporter:
-      logSpans: false
-      queueSize: 100
-      bufferFlushInterval: 10
-  sampler:
-    type: const
-    param: 1
-  headers:
-      jaegerDebugHeader: debug-id
-      jaegerBaggageHeader: baggage
-      TraceContextHeaderName: trace-id
-      traceBaggageHeaderPrefix: "testctx-"
-  baggage_restrictions:
-      denyBaggageOnInitializationFailure: false
-      refreshInterval: 60
-  )cfg";
-  const auto configuration = jaegertracing::Config::parse(YAML::Load(yaml));
-  auto tracer = jaegertracing::Tracer::make( tracerName, configuration,
-	jaegertracing::logging::consoleLogger());
-  }catch(...) { return; }
+#define dout_context g_ceph_context
+#define dout_subsys ceph_subsys_osd
+#undef dout_prefix
+#define dout_prefix *_dout << "jaeger-osd "
 
-  opentracing::Tracer::InitGlobal(
-      std::_pointer_cast<opentracing::Tracer>(tracer)); }
+namespace jaeger_tracing{
 
- inline jspan jaeger_tracing::new_span(const char* span_name){ 
-   return opentracing::Tracer::Global()->StartSpan(span_name); 
+
+  jspan new_span(const char* span_name){
+   return opentracing::Tracer::Global()->StartSpan(span_name);
  }
 
- inline jspan jaeger_tracing::child_span(const char* span_name, const jspan* const parent_span){
-  if(parent_span){ 
+  jspan child_span(const char* span_name, const jspan& parent_span){
+  if(parent_span){
     return opentracing::Tracer::Global()->StartSpan(span_name,
-	{opentracing::ChildOf(&parent_span->context())}); } return nullptr;
+	{opentracing::ChildOf(&parent_span->context())}); }
+  return nullptr;
  }
 
- inline void jaeger_tracing::finish_span(jspan* span){ if(span){ span->Finish(); } }
+  void finish_span(const jspan& span){ if(span){ span->Finish(); } }
 
- inline void jaeger_tracing::set_span_tag(jspan* span, const char* key, const char* value){ if(span)
+  void set_span_tag(const jspan& span, const char* key, const char* value){ if(span)
   span->SetTag(key, value); }
+}
