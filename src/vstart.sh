@@ -165,6 +165,7 @@ rgw_compression=""
 lockdep=${LOCKDEP:-1}
 spdk_enabled=0 #disable SPDK by default
 zoned_enabled=0
+with_jaeger=0
 
 with_mgr_dashboard=true
 if [[ "$(get_cmake_variable WITH_MGR_DASHBOARD_FRONTEND)" != "ON" ]] ||
@@ -234,6 +235,7 @@ usage=$usage"\t--bluestore-zoned: blockdevs listed by --bluestore-devs are zoned
 usage=$usage"\t--inc-osd: append some more osds into existing vcluster\n"
 usage=$usage"\t--cephadm: enable cephadm orchestrator with ~/.ssh/id_rsa[.pub]\n"
 usage=$usage"\t--no-parallel: dont start all OSDs in parallel\n"
+usage=$usage"\t--jaeger: use jaegertracing for tracing osd and rgw\n"
 
 usage_exit() {
     printf "$usage"
@@ -404,8 +406,7 @@ case $1 in
         shift
         ;;
     -o )
-        extra_conf="$extra_conf	$2
-"
+        extra_conf="$extra_conf	$2"
         shift
         ;;
     --cache )
@@ -419,11 +420,11 @@ case $1 in
     --nolockdep )
         lockdep=0
         ;;
-    --multimds)
+    --multimds )
         CEPH_MAX_MDS="$2"
         shift
         ;;
-    --without-dashboard)
+    --without-dashboard )
         with_mgr_dashboard=false
         ;;
     --bluestore-spdk )
@@ -444,6 +445,11 @@ case $1 in
         ;;
     --bluestore-zoned )
         zoned_enabled=1
+        shift
+        ;;
+    --jaeger )
+        with_jaeger=1
+        echo "with_jaeger $with_jaeger"
         ;;
     * )
         usage_exit
@@ -1508,6 +1514,46 @@ do_rgw()
 if [ "$CEPH_NUM_RGW" -gt 0 ]; then
     do_rgw
 fi
+
+
+ docker_service(){
+     local service=''
+     #prefer podman
+     if pgrep -f podman > /dev/null; then
+	 service="podman"
+     elif pgrep -f docker > /dev/null; then
+	 service="docker"
+     fi
+     if [ -n "$service" ]; then
+       echo "using $service for deploying jaeger..."
+       #check for exited container, remove them and restart container
+       if [ "$($service ps -aq -f status=exited -f name=jaeger)" ]; then
+	 $service rm jaeger
+       fi
+       if [ ! "$(podman ps -aq -f name=jaeger)" ]; then
+         $service "$@"
+       fi
+     else
+         echo "cannot find docker or podman, please restart service and rerun."
+     fi
+ }
+
+echo ""
+if [ $with_jaeger -eq 1 ]; then
+    debug echo "Enabling jaegertracing..."
+    docker_service run -d --name jaeger \
+  -e COLLECTOR_ZIPKIN_HTTP_PORT=9411 \
+  -p 5775:5775/udp \
+  -p 6831:6831/udp \
+  -p 6832:6832/udp \
+  -p 5778:5778 \
+  -p 16686:16686 \
+  -p 14268:14268 \
+  -p 14250:14250 \
+  -p 9411:9411 \
+  jaegertracing/all-in-one:1.18
+fi
+
 
 debug echo "vstart cluster complete. Use stop.sh to stop. See out/* (e.g. 'tail -f out/????') for debug output."
 
