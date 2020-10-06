@@ -338,3 +338,71 @@ class TestSnapSchedules(CephFSTestCase):
         self.remove_snapshots(TestSnapSchedules.TEST_DIRECTORY)
 
         self.mount_a.run_shell(['rmdir', TestSnapSchedules.TEST_DIRECTORY])
+
+    def test_snap_schedule_deactivate(self):
+        self.mount_a.run_shell(['mkdir', '-p', TestSnapSchedules.TEST_DIRECTORY])
+
+        # set a schedule on the dir
+        exec_time = time.time()
+        self.fs_snap_schedule_cmd('add', f'path={TestSnapSchedules.TEST_DIRECTORY}', 'snap-schedule=1M')
+
+        timo, snap_sfx = self.calc_wait_time_and_snap_name(exec_time, '1M')
+        log.debug(f'expecting snap {TestSnapSchedules.TEST_DIRECTORY}/.snap/scheduled-{snap_sfx} in ~{timo}s...')
+        to_wait = timo + 2 # some leeway to avoid false failures...
+
+        # verify snapshot schedule
+        self.verify_schedule(TestSnapSchedules.TEST_DIRECTORY, ['1M'])
+
+        def verify_added(snaps_added):
+            log.debug(f'snapshots added={snaps_added}')
+            self.assertEquals(len(snaps_added), 1)
+            snapname = snaps_added[0]
+            if snapname.startswith('scheduled-') and snapname[10:] == snap_sfx:
+                now = time.time()
+                # snap should not prematurely come into existance
+                log.debug(f'exec={exec_time}, now = {now}, timo = {timo}')
+                self.assertTrue((now - exec_time) >= timo)
+                return True
+            return False
+        self.add_snap_create_cbk(verify_added)
+        self.verify(TestSnapSchedules.TEST_DIRECTORY, to_wait)
+        self.assert_if_not_verified()
+
+        # deactivate snapshot
+        self.fs_snap_schedule_cmd('deactivate', f'path={TestSnapSchedules.TEST_DIRECTORY}', 'repeat=1M')
+
+        time.sleep(65)
+        snap_path = "{0}/.snap".format(TestSnapSchedules.TEST_DIRECTORY)
+        snapshots = set(self.mount_a.ls(path=snap_path))
+        self.assertEquals(len(snapshots), 1)
+
+        exec_time = time.time()
+        # activate again
+        self.fs_snap_schedule_cmd('activate', f'path={TestSnapSchedules.TEST_DIRECTORY}', 'repeat=1M')
+
+        timo, snap_sfx = self.calc_wait_time_and_snap_name(exec_time, '1M')
+        log.debug(f'expecting snap {TestSnapSchedules.TEST_DIRECTORY}/.snap/scheduled-{snap_sfx} in ~{timo}s...')
+        to_wait = timo + 2 # some leeway to avoid false failures...
+
+        def verify_added_again(snaps_added):
+            log.debug(f'snapshots added={snaps_added}')
+            self.assertEquals(len(snaps_added), 1)
+            snapname = snaps_added[0]
+            if snapname.startswith('scheduled-') and snapname[10:] == snap_sfx:
+                now = time.time()
+                # snap should not prematurely come into existance
+                log.debug(f'exec={exec_time}, now = {now}, timo = {timo}')
+                self.assertTrue((now - exec_time) >= timo)
+                return True
+            return False
+        self.add_snap_create_cbk(verify_added_again)
+        self.verify(TestSnapSchedules.TEST_DIRECTORY, to_wait)
+        self.assert_if_not_verified()
+
+        # remove snapshot schedule
+        self.fs_snap_schedule_cmd('remove', f'path={TestSnapSchedules.TEST_DIRECTORY}')
+
+        # remove all scheduled snapshots
+        self.remove_snapshots(TestSnapSchedules.TEST_DIRECTORY)
+
+        self.mount_a.run_shell(['rmdir', TestSnapSchedules.TEST_DIRECTORY])
