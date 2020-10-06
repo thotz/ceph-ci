@@ -7018,10 +7018,10 @@ void OSD::dispatch_session_waiting(const ceph::ref_t<Session>& session, OSDMapRe
 void OSD::ms_fast_dispatch(Message *m)
 {
 
-  if(!opentracing::Tracer::Global()){
-    jaeger_tracing::init_tracer("tracing service init osd");
-  }
-
+#ifdef WITH_JAEGER
+  jaeger_tracing::init_tracer("tracing service init osd");
+  dout(10) << "jaeger tracer after " << opentracing::Tracer::Global() << dendl;
+#endif
   FUNCTRACE(cct);
   if (service.is_stopping()) {
     m->put();
