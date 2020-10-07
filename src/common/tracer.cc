@@ -9,42 +9,49 @@ typedef int64_t __s64;
 
 #include "common/debug.h"
 
+#define dout_context g_ceph_context
+#define dout_subsys ceph_subsys_osd
+#undef dout_prefix
+#define dout_prefix *_dout << "jaegertracing "
+
 namespace jaeger_tracing{
 
    std::shared_ptr<opentracing::v3::Tracer> tracer = nullptr;
 
-   static void init_tracer(const char* tracer_name){
+   void init_tracer(const char* tracer_name){
     dout(3) << "init_tracer" << dendl;
     if(!tracer){
 	dout(3) << "tracer not found, cofiguring jaegertracing" << dendl;
 	YAML::Node yaml;
 	try{
 	  yaml = YAML::LoadFile("../src/jaegertracing/config.yml");
+	dout(3) << "yaml loaded" << yaml << dendl;
 	}
 	catch(std::exception &e){
 	  dout(3) << "failed to load yaml file using default config" << dendl;
 	  auto yaml_config = R"cfg(
-	      disabled: false
-	      reporter:
-		  logSpans: false
-		  queueSize: 100
-		  bufferFlushInterval: 10
-	      sampler:
-		  type: const
-		  param: 1
-	      headers:
-		  jaegerDebugHeader: debug-id
-		  jaegerBaggageHeader: baggage
-		  TraceContextHeaderName: trace-id
-		  traceBaggageHeaderPrefix: "testctx-"
-	      baggage_restrictions:
-		  denyBaggageOnInitializationFailure: false
-		  refreshInterval: 60
-	  )cfg";
+disabled: false
+reporter:
+    logSpans: false
+    queueSize: 100
+    bufferFlushInterval: 10
+sampler:
+    type: const
+    param: 1
+headers:
+    jaegerDebugHeader: debug-id
+    jaegerBaggageHeader: baggage
+    TraceContextHeaderName: trace-id
+    traceBaggageHeaderPrefix: "testctx-"
+baggage_restrictions:
+    denyBaggageOnInitializationFailure: false
+    refreshInterval: 60
+)cfg";
 	yaml = YAML::Load(yaml_config);
+	dout(3) << "yaml loaded" << yaml << dendl;
       }
       static auto configuration = jaegertracing::Config::parse(yaml);
-      dout(3) << "yaml parsed" << yaml << dendl;
+      dout(3) << "yaml parsed" << dendl;
       tracer = jaegertracing::Tracer::make( tracer_name, configuration,
 	    jaegertracing::logging::consoleLogger());
       dout(3) << "tracer_jaeger" << tracer << dendl;
@@ -55,10 +62,6 @@ namespace jaeger_tracing{
 	  std::static_pointer_cast<opentracing::Tracer>(tracer));
       dout(3) << "tracer_global_set_to" << tracer << dendl;
     }
-  //test spans
-  auto parent_span = tracer->StartSpan("parent");
-  assert(parent_span);
-  parent_span->Finish();
   }
 
   jspan new_span(const char* span_name){
@@ -75,9 +78,13 @@ namespace jaeger_tracing{
  }
 
   void finish_span(const jspan& span){
-    if(span){ span->Finish(); }
+    if(span){
+      dout(3) << "explict span finish for" << &span << dendl;
+      span->Finish();
+    }
   }
 
   void set_span_tag(const jspan& span, const char* key, const char* value){ if(span)
   span->SetTag(key, value); }
 }
+//  void set_span_log(const jspan& span, const

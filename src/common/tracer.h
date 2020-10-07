@@ -21,13 +21,6 @@
 #define SIGNED_RIGHT_SHIFT_IS 1
 #define ARITHMETIC_RIGHT_SHIFT 1
 
-#include "common/debug.h"
-
-#define dout_context g_ceph_context
-#define dout_subsys ceph_subsys_jaeger
-#undef dout_prefix
-#define dout_prefix *_dout << "jaegertracing "
-
 #include <jaegertracing/Tracer.h>
 
 typedef std::unique_ptr<opentracing::Span> jspan;
@@ -37,7 +30,7 @@ namespace jaeger_tracing{
 
   extern std::shared_ptr<opentracing::v3::Tracer> tracer;
 
-  static void init_tracer(const char* tracer_name);
+  void init_tracer(const char* tracer_name);
 
   //method to create a root jspan
   jspan new_span(const char*);

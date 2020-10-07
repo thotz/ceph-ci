@@ -7018,9 +7018,10 @@ void OSD::dispatch_session_waiting(const ceph::ref_t<Session>& session, OSDMapRe
 void OSD::ms_fast_dispatch(Message *m)
 {
 
-#ifdef WITH_JAEGER
-  jaeger_tracing::init_tracer("tracing service init osd");
+#ifdef HAVE_JAEGER
+  jaeger_tracing::init_tracer("osd-services-reinit");
   dout(10) << "jaeger tracer after " << opentracing::Tracer::Global() << dendl;
+  auto dispatch_span = jaeger_tracing::new_span(__func__);
 #endif
   FUNCTRACE(cct);
   if (service.is_stopping()) {
@@ -7082,19 +7083,21 @@ void OSD::ms_fast_dispatch(Message *m)
     tracepoint(osd, ms_fast_dispatch, reqid.name._type,
         reqid.name._num, reqid.tid, reqid.inc);
   }
-//  auto dispatch_span = jaeger_tracing::new_span("op-request-created");
-//  op->set_osd_parent_span(dispatch_span);
-//  jaeger_tracing::finish_span(op->osd_parent_span);
+#ifdef HAVE_JAEGER
+  op->set_osd_parent_span(dispatch_span);
+  auto op_req_span = jaeger_tracing::child_span("op-request-created", op->osd_parent_span);
+  op->set_osd_parent_span(op_req_span);
+//  op->osd_parent_span->Log({
+//      {"sent epoch by op", op->sent_epoch},
+//      {"min epoch for op", op->min_epoch}
+//      });
+#endif
   if (m->trace)
     op->osd_trace.init("osd op", &trace_endpoint, &m->trace);
 
   // note sender epoch, min req's epoch
   op->sent_epoch = static_cast<MOSDFastDispatchOp*>(m)->get_map_epoch();
   op->min_epoch = static_cast<MOSDFastDispatchOp*>(m)->get_min_epoch();
-  op->osd_parent_span->Log({
-      {"sent epoch by op", op->sent_epoch},
-      {"min epoch for op", op->min_epoch}
-      });
   ceph_assert(op->min_epoch <= op->sent_epoch); // sanity check!
 
   service.maybe_inject_dispatch_delay();
@@ -7120,7 +7123,10 @@ void OSD::ms_fast_dispatch(Message *m)
       service.release_map(nextmap);
     }
   }
-  OID_EVENT_TRACE_WITH_MSG(m, "MS_FAST_DISPATCH_END", false); 
+  OID_EVENT_TRACE_WITH_MSG(m, "MS_FAST_DISPATCH_END", false);
+#ifdef HAVE_JAEGER
+  jaeger_tracing::finish_span(dispatch_span);
+#endif
 }
 
 int OSD::ms_handle_authentication(Connection *con)
@@ -9638,6 +9644,16 @@ void OSD::enqueue_op(spg_t pg, OpRequestRef&& op, epoch_t epoch)
   op->osd_trace.event("enqueue op");
   op->osd_trace.keyval("priority", priority);
   op->osd_trace.keyval("cost", cost);
+#ifdef HAVE_JAEGER
+  auto enqueue_span = jaeger_tracing::child_span("enqueue_op", op->osd_parent_span);
+  enqueue_span->Log({
+      {"priority", priority},
+      {"cost", cost},
+      {"epoch", epoch},
+      {"owner", owner} //Not got owner in UI
+      });
+  op->set_osd_parent_span(enqueue_span);
+#endif
   op->mark_queued_for_pg();
   logger->tinc(l_osd_op_before_queue_op_lat, latency);
   if (type == MSG_OSD_PG_PUSH ||
@@ -10537,6 +10553,11 @@ void OSD::ShardedOpWQ::_process(uint32_t thread_index, heartbeat_handle_d *hb)
 	   << " waiting_peering " << slot->waiting_peering
 	   << dendl;
   slot->to_process.push_back(std::move(item));
+#ifdef HAVE_JAEGER
+  auto queued_span = jaeger_tracing::child_span(__func__, op->osd_parent_span);
+  op->set_osd_parent_span(queued_span);
+  jaeger_tracing::finish_span(enqueue_span);
+#endif
   dout(20) << __func__ << " " << slot->to_process.back()
 	   << " queued" << dendl;
 
