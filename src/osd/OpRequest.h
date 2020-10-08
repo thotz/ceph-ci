@@ -91,7 +91,9 @@ public:
   bool hitset_inserted;
   jspan osd_parent_span;
 #ifdef HAVE_JAEGER
-  void set_osd_parent_span(jspan& span ) { osd_parent_span = move(span); }
+  void set_osd_parent_span(jspan& span) {
+    jaeger_tracing::finish_span(osd_parent_span);
+    osd_parent_span = move(span); }
 #else
   void set_osd_parent_span(...) {}
 #endif

@@ -7124,9 +7124,6 @@ void OSD::ms_fast_dispatch(Message *m)
     }
   }
   OID_EVENT_TRACE_WITH_MSG(m, "MS_FAST_DISPATCH_END", false);
-#ifdef HAVE_JAEGER
-  jaeger_tracing::finish_span(dispatch_span);
-#endif
 }
 
 int OSD::ms_handle_authentication(Connection *con)
@@ -9645,14 +9642,14 @@ void OSD::enqueue_op(spg_t pg, OpRequestRef&& op, epoch_t epoch)
   op->osd_trace.keyval("priority", priority);
   op->osd_trace.keyval("cost", cost);
 #ifdef HAVE_JAEGER
-  auto enqueue_span = jaeger_tracing::child_span("enqueue_op", op->osd_parent_span);
+  auto enqueue_span = jaeger_tracing::child_span(__func__, op->osd_parent_span);
   enqueue_span->Log({
       {"priority", priority},
       {"cost", cost},
       {"epoch", epoch},
       {"owner", owner} //Not got owner in UI
       });
-  op->set_osd_parent_span(enqueue_span);
+//  op->set_osd_parent_span(enqueue_span);
 #endif
   op->mark_queued_for_pg();
   logger->tinc(l_osd_op_before_queue_op_lat, latency);
@@ -10553,11 +10550,6 @@ void OSD::ShardedOpWQ::_process(uint32_t thread_index, heartbeat_handle_d *hb)
 	   << " waiting_peering " << slot->waiting_peering
 	   << dendl;
   slot->to_process.push_back(std::move(item));
-#ifdef HAVE_JAEGER
-  auto queued_span = jaeger_tracing::child_span(__func__, op->osd_parent_span);
-  op->set_osd_parent_span(queued_span);
-  jaeger_tracing::finish_span(enqueue_span);
-#endif
   dout(20) << __func__ << " " << slot->to_process.back()
 	   << " queued" << dendl;
 

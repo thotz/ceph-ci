@@ -1666,8 +1666,11 @@ void PrimaryLogPG::do_request(
     op->pg_trace.init("pg op", &trace_endpoint, &op->osd_trace);
     op->pg_trace.event("do request");
   }
-//  auto do_req_span = jaeger_tracing::child_span("do request init", op->osd_parent_span);
-  // make sure we have a new enough map
+#ifdef HAVE_JAEGER
+  auto do_req_span = jaeger_tracing::child_span(__func__, op->osd_parent_span);
+//  op->set_osd_parent_span(do_req_span);
+#endif
+// make sure we have a new enough map
   auto p = waiting_for_map.find(op->get_source());
   if (p != waiting_for_map.end()) {
     // preserve ordering
@@ -1841,6 +1844,7 @@ void PrimaryLogPG::do_request(
  */
 void PrimaryLogPG::do_op(OpRequestRef& op)
 {
+
   FUNCTRACE(cct);
   // NOTE: take a non-const pointer here; we must be careful not to
   // change anything that will break other reads on m (operator<<).
@@ -2030,6 +2034,10 @@ void PrimaryLogPG::do_op(OpRequestRef& op)
 	   << " flags " << ceph_osd_flag_string(m->get_flags())
 	   << dendl;
 
+#ifdef HAVE_JAEGER
+  auto do_op_span = jaeger_tracing::child_span(__func__, op->osd_parent_span);
+//  op->set_osd_parent_span(do_op_span);
+#endif
   // missing object?
   if (is_unreadable_object(head)) {
     if (!is_primary()) {
@@ -2255,6 +2263,7 @@ void PrimaryLogPG::do_op(OpRequestRef& op)
 	get_osdmap()->require_osd_release >= ceph_release_t::kraken) {
       record_write_error(op, oid, nullptr, r);
     } else {
+      //TODO: jaeger: add span 
       osd->reply_op_error(op, r);
     }
     return;
@@ -3859,6 +3868,10 @@ void PrimaryLogPG::execute_ctx(OpContext *ctx)
     tracepoint(osd, prepare_tx_enter, reqid.name._type,
         reqid.name._num, reqid.tid, reqid.inc);
   }
+#ifdef HAVE_JAEGER
+  auto execute_span = jaeger_tracing::child_span(__func__, ctx->op->osd_parent_span);
+//  ctx->op->set_osd_parent_span(execute_span);
+#endif
 
   int result = prepare_transaction(ctx);
 
@@ -5625,6 +5638,10 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
   PGTransaction* t = ctx->op_t.get();
 
   dout(10) << "do_osd_op " << soid << " " << ops << dendl;
+#ifdef HAVE_JAEGER
+  auto do_osd_op_span = jaeger_tracing::child_span(__func__, ctx->op->osd_parent_span);
+//  op->set_osd_parent_span(do_osd_op_span);
+#endif
 
   ctx->current_osd_subop_num = 0;
   for (auto p = ops.begin(); p != ops.end(); ++p, ctx->current_osd_subop_num++, ctx->processed_subop_count++) {
@@ -8463,6 +8480,10 @@ void PrimaryLogPG::finish_ctx(OpContext *ctx, int log_op_type, int result)
 	   << dendl;
   utime_t now = ceph_clock_now();
 
+#ifdef HAVE_JAEGER
+  auto finish_ctx_span = jaeger_tracing::child_span(__func__, ctx->op->osd_parent_span);
+//  op->set_osd_parent_span(finish_ctx_span);
+#endif
   // Drop the reference if deduped chunk is modified
   if (ctx->new_obs.oi.is_dirty() &&
     (ctx->obs->oi.has_manifest() && ctx->obs->oi.manifest.is_chunked()) &&
@@ -8473,7 +8494,7 @@ void PrimaryLogPG::finish_ctx(OpContext *ctx, int log_op_type, int result)
     log_op_type != pg_log_entry_t::PROMOTE) {
     dec_refcount_by_dirty(ctx);
   }
-  
+
   // finish and log the op.
   if (ctx->user_modify) {
     // update the user_version for any modify ops, except for the watch op
@@ -10465,6 +10486,10 @@ void PrimaryLogPG::op_applied(const eversion_t &applied_version)
 
 void PrimaryLogPG::eval_repop(RepGather *repop)
 {
+  #ifdef HAVE_JAEGER
+  auto eval_span = jaeger_tracing::child_span(__func__, repop->op->osd_parent_span);
+//  op->set_osd_parent_span(issue_repop_span);
+ #endif
   dout(10) << "eval_repop " << *repop
     << (repop->op && repop->op->get_req<MOSDOp>() ? "" : " (no op)") << dendl;
 
@@ -10519,6 +10544,11 @@ void PrimaryLogPG::issue_repop(RepGather *repop, OpContext *ctx)
   dout(7) << "issue_repop rep_tid " << repop->rep_tid
           << " o " << soid
           << dendl;
+#ifdef HAVE_JAEGER
+  auto issue_repop_span = jaeger_tracing::child_span(__func__,
+      ctx->op->osd_parent_span);
+//  op->set_osd_parent_span(issue_repop_span);
+#endif
 
   repop->v = ctx->at_version;
 
