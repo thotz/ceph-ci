@@ -1465,7 +1465,7 @@ void PrimaryLogPG::do_pg_op(OpRequestRef op)
 	  if (candidate >= next) {
 	    break;
 	  }
-	    
+
 	  if (response.entries.size() == list_size) {
 	    next = candidate;
 	    break;
@@ -1597,8 +1597,7 @@ int PrimaryLogPG::do_scrub_ls(const MOSDOp *m, OSDOp *osd_op)
   if (arg.interval != 0 && arg.interval != info.history.same_interval_since) {
     r = -EAGAIN;
   } else {
-    bool store_queried = static_cast<PrimaryLogScrub*>(m_scrubber.get())->get_store_errors(
-                               arg, result);
+    bool store_queried = m_scrubber->get_store_errors(arg, result);
     if (!store_queried) {
       // the scrubber's store is not initialized
       r = -ENOENT;
