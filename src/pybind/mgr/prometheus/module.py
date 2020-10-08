@@ -108,6 +108,13 @@ DISK_OCCUPATION = ('ceph_daemon', 'device', 'db_device',
 
 NUM_OBJECTS = ['degraded', 'misplaced', 'unfound']
 
+HEALTH_CHECKS = [
+    {
+        "name": 'SLOW_OPS',
+        "description": 'OSD requests taking a long time to process',
+    },
+]
+
 
 class Metric(object):
     def __init__(self, mtype, name, desc, labels=None):
@@ -432,14 +439,53 @@ class Module(MgrModule):
                 'Number of {} objects'.format(state),
             )
 
+        for check in HEALTH_CHECKS:
+            path = 'healthcheck_{}'.format(check['name'].lower())
+            metrics[path] = Metric(
+                'gauge',
+                path,
+                check['description'],
+            )
+
         return metrics
 
     @profile_method()
     def get_health(self):
+
+        def _get_value(message, delim=" ", word_pos=0):
+            """Extract value from message (default is 1st field)"""
+            v_str = message.split(delim)[word_pos]
+            if v_str.isdigit():
+                return int(v_str), 0
+            return 0, 1
+
         health = json.loads(self.get('health')['json'])
+        # set overall health
         self.metrics['health_status'].set(
             health_status_to_number(health['status'])
         )
+
+        # Examine the health to see if any health checks triggered need to
+        # become a metric.
+        active_healthchecks = health.get('checks', {})
+        active_names = active_healthchecks.keys()
+
+        # healthcheck metrics must always be present in the scrape
+        for healthcheck in HEALTH_CHECKS:
+            v = 0
+            err = 0
+
+            check_name = healthcheck['name']
+            if check_name in active_names:
+                check_data = active_healthchecks[check_name]
+                message = check_data['summary'].get('message', '')
+                if check_name == "SLOW_OPS":
+                    v, err = _get_value(message)
+                if err:
+                    self.log.warning("healthcheck {} message format has changed and is incompatible".format(check_name))
+
+            path = 'healthcheck_{}'.format(check_name.lower())
+            self.metrics[path].set(v)
 
     @profile_method()
     def get_pool_stats(self):
