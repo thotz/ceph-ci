@@ -10501,7 +10501,7 @@ void OSD::ShardedOpWQ::_process(uint32_t thread_index, heartbeat_handle_d *hb)
     return;
   }
 
-  OpSchedulerItem item = sdata->scheduler->dequeue();
+  auto work_item = sdata->scheduler->dequeue();
   if (osd->is_stopping()) {
     sdata->shard_lock.unlock();
     for (auto c : oncommits) {
@@ -10510,6 +10510,21 @@ void OSD::ShardedOpWQ::_process(uint32_t thread_index, heartbeat_handle_d *hb)
     }
     return;    // OSD shutdown, discard.
   }
+
+  // If the work item is scheduled in the future, wait until
+  // the time returned in the dequeue response before retrying.
+  if (auto when_ready = std::get_if<double>(&work_item)) {
+    auto future_time = ceph::real_clock::from_double(*when_ready);
+    std::unique_lock wait_lock{sdata->sdata_wait_lock};
+    dout(10) << __func__ << " dequeue future request at " << future_time << dendl;
+    sdata->shard_lock.unlock();
+    sdata->sdata_cond.wait_until(wait_lock, future_time);
+    wait_lock.unlock();
+    handle_oncommits(oncommits);
+    return;
+  }
+  // Access the stored item
+  auto item = std::move(std::get<OpSchedulerItem>(work_item));
 
   const auto token = item.get_ordering_token();
   auto r = sdata->pg_slots.emplace(token, nullptr);
