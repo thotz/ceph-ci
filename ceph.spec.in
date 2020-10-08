@@ -147,6 +147,7 @@ BuildRequires:	gperftools-devel >= 2.6.1
 %endif
 %if 0%{?suse_version}
 BuildRequires:	gperftools-devel >= 2.4
+BuildRequires:  libc++-devel >= 9.0
 %endif
 %endif
 BuildRequires:	leveldb-devel > 1.2
