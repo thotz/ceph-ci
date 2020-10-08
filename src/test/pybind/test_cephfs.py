@@ -142,6 +142,10 @@ def test_xattr():
     assert_equal(9, ret_val)
     assert_equal("user.big\x00", ret_buff.decode('utf-8'))
 
+    cephfs.removexattr("/", "user.big")
+    # user.big is already removed
+    assert_raises(libcephfs.NoData, cephfs.getxattr, "/", "user.big")
+
 @with_setup(setup_test)
 def test_ceph_mirror_xattr():
     def gen_mirror_xattr():
