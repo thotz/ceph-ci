@@ -45,7 +45,7 @@ setup()
 
     _sudo echo test sudo
 
-    trap cleanup INT TERM EXIT
+    trap 'cleanup $?' INT TERM EXIT
     TEMPDIR=`mktemp -d`
     DATA=${TEMPDIR}/data
     dd if=/dev/urandom of=${DATA} bs=1M count=${SIZE}
@@ -60,11 +60,18 @@ setup()
 
 function cleanup()
 {
+    local error_code=$1
+
     local ns s
 
     set +e
 
-    mount | fgrep ${TEMPDIR}/mnt && umount ${TEMPDIR}/mnt
+    if [ "${error_code}" -ne 0 ]; then
+        rbd-nbd list-mapped
+        sleep 3600
+    fi
+
+    mount | fgrep ${TEMPDIR}/mnt && _sudo umount -f ${TEMPDIR}/mnt
 
     rm -Rf ${TEMPDIR}
     if [ -n "${DEV}" ]
@@ -146,7 +153,7 @@ dev1=${DEV}
 unmap_device ${DEV} ${PID}
 DEV=
 # XXX: race possible when the device is reused by other process
-DEV=`_sudo rbd-nbd --device ${dev1} map ${POOL}/${IMAGE}`
+DEV=`_sudo rbd-nbd --device ${dev1} map ${POOL}/${IMAGE} --try-netlink`
 [ "${DEV}" = "${dev1}" ]
 rbd-nbd list-mapped | grep "${IMAGE}"
 get_pid
