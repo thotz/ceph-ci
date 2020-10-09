@@ -5854,7 +5854,7 @@ const Server::XattrHandler* Server::get_xattr_or_default_handler(std::string_vie
   return default_xattr_handler;
 }
 
-int Server::xattr_validate(CInode *cur, InodeStoreBase::xattr_map_const_ptr xattrs,
+int Server::xattr_validate(CInode *cur, const InodeStoreBase::xattr_map_const_ptr xattrs,
                            const std::string &xattr_name, int op, int flags) {
   if (op == CEPH_MDS_OP_SETXATTR) {
     if (xattrs) {
@@ -5903,7 +5903,7 @@ void Server::xattr_rm(InodeStoreBase::xattr_map_ptr xattrs, const std::string &x
   xattrs->erase(mempool::mds_co::string(xattr_name));
 }
 
-int Server::default_xattr_validate(CInode *cur, InodeStoreBase::xattr_map_const_ptr xattrs,
+int Server::default_xattr_validate(CInode *cur, const InodeStoreBase::xattr_map_const_ptr xattrs,
                                    XattrOp *xattr_op) {
   return xattr_validate(cur, xattrs, xattr_op->xattr_name, xattr_op->op, xattr_op->flags);
 }
@@ -5944,7 +5944,7 @@ int Server::parse_mirror_info_xattr(const std::string &name, const std::string &
   return 0;
 }
 
-int Server::mirror_info_xattr_validate(CInode *cur, InodeStoreBase::xattr_map_const_ptr xattrs,
+int Server::mirror_info_xattr_validate(CInode *cur, const InodeStoreBase::xattr_map_const_ptr xattrs,
                                        XattrOp *xattr_op) {
   if (!cur->is_root()) {
     return -EINVAL;

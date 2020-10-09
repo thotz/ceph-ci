@@ -365,7 +365,7 @@ private:
     // reject xattr request (set or remove), zero to proceed. handlers
     // may parse xattr value for verification if needed and have an
     // option to store custom data in XattrOp::xinfo.
-    int (Server::*validate)(CInode *cur, InodeStoreBase::xattr_map_const_ptr xattrs,
+    int (Server::*validate)(CInode *cur, const InodeStoreBase::xattr_map_const_ptr xattrs,
                             XattrOp *xattr_op);
 
     // set xattr for an inode in xattr_map
@@ -383,14 +383,14 @@ private:
   const XattrHandler* get_xattr_or_default_handler(std::string_view xattr_name);
 
   // generic variant to set/remove xattr in/from xattr_map
-  int xattr_validate(CInode *cur, InodeStoreBase::xattr_map_const_ptr xattrs,
+  int xattr_validate(CInode *cur, const InodeStoreBase::xattr_map_const_ptr xattrs,
                      const std::string &xattr_name, int op, int flags);
   void xattr_set(InodeStoreBase::xattr_map_ptr xattrs, const std::string &xattr_name,
                  const bufferlist &xattr_value);
   void xattr_rm(InodeStoreBase::xattr_map_ptr xattrs, const std::string &xattr_name);
 
   // default xattr handlers
-  int default_xattr_validate(CInode *cur, InodeStoreBase::xattr_map_const_ptr xattrs,
+  int default_xattr_validate(CInode *cur, const InodeStoreBase::xattr_map_const_ptr xattrs,
                              XattrOp *xattr_op);
   void default_setxattr_handler(CInode *cur, InodeStoreBase::xattr_map_ptr xattrs,
                                 const XattrOp &xattr_op);
@@ -400,14 +400,14 @@ private:
   // mirror info xattr handler
   int parse_mirror_info_xattr(const std::string &name, const std::string &value,
                               std::string &cluster_id, std::string &fs_id);
-  int mirror_info_xattr_validate(CInode *cur, InodeStoreBase::xattr_map_const_ptr xattrs,
+  int mirror_info_xattr_validate(CInode *cur, const InodeStoreBase::xattr_map_const_ptr xattrs,
                                  XattrOp *xattr_op);
   void mirror_info_setxattr_handler(CInode *cur, InodeStoreBase::xattr_map_ptr xattrs,
                                     const XattrOp &xattr_op);
   void mirror_info_removexattr_handler(CInode *cur, InodeStoreBase::xattr_map_ptr xattrs,
                                        const XattrOp &xattr_op);
 
-  bool is_ceph_vxattr(std::string_view xattr_name) {
+  static bool is_ceph_vxattr(std::string_view xattr_name) {
     return xattr_name.rfind("ceph.dir.layout", 0) == 0 ||
            xattr_name.rfind("ceph.file.layout", 0) == 0 ||
            xattr_name.rfind("ceph.quota", 0) == 0 ||
@@ -417,7 +417,7 @@ private:
            xattr_name == "ceph.dir.pin.distributed"sv;
   }
 
-  bool is_allowed_ceph_xattr(std::string_view xattr_name) {
+  static bool is_allowed_ceph_xattr(std::string_view xattr_name) {
     // not a ceph xattr -- allow!
     if (xattr_name.rfind("ceph.", 0) != 0) {
       return true;
