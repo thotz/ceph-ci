@@ -503,6 +503,15 @@ public:
 
     /// Callbacks
     Context *on_all_commit = nullptr;
+
+    bool primary_committed = false;
+
+    size_t tolerated_uncommit_size = 0;
+    void set_tolerated_uncommit_size(const unsigned pool_size, const unsigned pw_size, const bool is_use_tier) {
+      if (!is_use_tier && pw_size > 0)
+        tolerated_uncommit_size = pool_size - pw_size;
+    }
+
     ~Op() {
       delete on_all_commit;
     }
@@ -625,6 +634,26 @@ public:
     return new ECReadPred(get_parent()->whoami_shard(), ec_impl);
   }
 
+  /**
+   * ECRollbackRred
+   *
+   * Determines should to rollback
+   */
+  class ECRollbackRred : public IsPGRollbackPredicate {
+    ceph::ErasureCodeInterfaceRef ec_impl;
+  public:
+    explicit ECRollbackRred(ceph::ErasureCodeInterfaceRef ec_impl) : ec_impl(ec_impl) {}
+
+    bool operator()(const unsigned have_size, const unsigned pw_size) const override {
+      if (have_size + pw_size < ec_impl->get_chunk_count())
+        return true;
+
+      return false;
+    }
+  };
+  ECRollbackRred *get_is_rollback_predicate() const {
+    return new ECRollbackRred(ec_impl);
+  }
 
   const ECUtil::stripe_info_t sinfo;
   /// If modified, ensure that the ref is held until the update is applied
