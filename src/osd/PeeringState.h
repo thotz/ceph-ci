@@ -1558,6 +1558,9 @@ public:
     const OSDMapRef osdmap) const;
 
   bool recoverable(const std::vector<int> &want) const;
+  bool should_rollback(const std::vector<int> &want,
+         const eversion_t &most_frequency_last_update,
+         const eversion_t &max_last_update) const;
   bool choose_acting(pg_shard_t &auth_log_shard,
 		     bool restrict_to_up_acting,
 		     bool *history_les_bound,
@@ -1688,8 +1691,9 @@ public:
   /// Std::set predicates used for determining readable and recoverable
   void set_backend_predicates(
     IsPGReadablePredicate *is_readable,
-    IsPGRecoverablePredicate *is_recoverable) {
-    missing_loc.set_backend_predicates(is_readable, is_recoverable);
+    IsPGRecoverablePredicate *is_recoverable,
+    IsPGRollbackPredicate *should_rollback) {
+    missing_loc.set_backend_predicates(is_readable, is_recoverable, should_rollback);
   }
 
   /// Send current pg_info to peers

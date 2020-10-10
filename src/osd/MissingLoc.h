@@ -109,6 +109,7 @@ class MissingLoc {
  public:
   boost::scoped_ptr<IsPGReadablePredicate> is_readable;
   boost::scoped_ptr<IsPGRecoverablePredicate> is_recoverable;
+  boost::scoped_ptr<IsPGRollbackPredicate> should_rollback;
   explicit MissingLoc(
     spg_t pgid,
     MappingInfo *mapping_info,
@@ -117,12 +118,17 @@ class MissingLoc {
     : pgid(pgid), mapping_info(mapping_info), dpp(dpp), cct(cct) { }
   void set_backend_predicates(
     IsPGReadablePredicate *_is_readable,
-    IsPGRecoverablePredicate *_is_recoverable) {
+    IsPGRecoverablePredicate *_is_recoverable,
+    IsPGRollbackPredicate *_should_rollback) {
     is_readable.reset(_is_readable);
     is_recoverable.reset(_is_recoverable);
+    should_rollback.reset(_should_rollback);
   }
   const IsPGRecoverablePredicate &get_recoverable_predicate() const {
     return *is_recoverable;
+  }
+  const IsPGRollbackPredicate &get_rollback_predicate() const {
+    return *should_rollback;
   }
   std::ostream& gen_prefix(std::ostream& out) const {
     return dpp->gen_prefix(out);

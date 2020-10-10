@@ -118,7 +118,8 @@ PG::PG(
 {
   peering_state.set_backend_predicates(
     new ReadablePredicate(pg_whoami),
-    new RecoverablePredicate());
+    new RecoverablePredicate(),
+    new IsPGRollbackPredicate());
   osdmap_gate.got_map(osdmap->get_epoch());
 }
 
