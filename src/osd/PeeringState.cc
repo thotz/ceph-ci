@@ -1523,7 +1523,7 @@ map<pg_shard_t, pg_info_t>::const_iterator PeeringState::find_best_info(
           i->second.push_back(p);
       }
     }
-    
+
     for (auto i = info_by_eversion.begin(); i != info_by_eversion.end(); ++i) {
       vector<int> infos_have;
       for (auto info = i->second.begin(); info != i->second.end(); ++i)
@@ -1548,16 +1548,18 @@ map<pg_shard_t, pg_info_t>::const_iterator PeeringState::find_best_info(
       continue;
     }
     if (pool.info.require_rollback()) {
-      if (ec_recovrty_to_lu == p->second.last_update) {
-        best = p;
-        continue;
-      } else {
+      if (ec_recovrty_to_lu == eversion_t::max()) {
         if (p->second.last_update > best->second.last_update)
           continue;
         if (p->second.last_update < best->second.last_update) {
           best = p;
           continue;
         }
+      }
+      else if (ec_recovrty_to_lu == p->second.last_update &&
+               ec_recovrty_to_lu != best->second.last_update) {
+        best = p;
+        continue;
       }
     } else {
       if (p->second.last_update < best->second.last_update)
