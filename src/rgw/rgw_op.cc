@@ -330,7 +330,7 @@ static int get_obj_head(struct req_state *s,
 			bufferlist *pbl)
 {
   std::unique_ptr<rgw::sal::RGWObject::ReadOp> read_op = obj->get_read_op(s->obj_ctx);
-  prefetch_range prefetch{0, static_cast<uint64_t>(s->cct->_conf->rgw_max_chunk_size)};
+  prefetch_range prefetch;
   s->obj_ctx->set_prefetch_data(obj->get_obj(), prefetch);
 
   int ret = read_op->prepare(s->yield);
