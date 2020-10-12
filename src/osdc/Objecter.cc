@@ -211,8 +211,8 @@ const char** Objecter::get_tracked_conf_keys() const
 {
   static const char *config_keys[] = {
     "crush_location",
-    "osdc_mon_timeout",
-    "osdc_osd_timeout",
+    "rados_mon_op_timeout",
+    "rados_osd_op_timeout",
     NULL
   };
   return config_keys;
@@ -225,15 +225,11 @@ void Objecter::handle_conf_change(const ConfigProxy& conf,
   if (changed.count("crush_location")) {
     update_crush_location();
   }
-  if (changed.count("osdc_mon_timeout")) {
-    if (!mon_timeout_configured) {
-      mon_timeout = conf.get_val<std::chrono::seconds>("osdc_mon_timeout");
-    }
+  if (changed.count("rados_mon_op_timeout")) {
+    mon_timeout = conf.get_val<std::chrono::seconds>("rados_mon_op_timeout");
   }
-  if (changed.count("osdc_osd_timeout")) {
-    if (!osd_timeout_configured) {
-      osd_timeout = conf.get_val<std::chrono::seconds>("osdc_osd_timeout");
-    }
+  if (changed.count("rados_osd_op_timeout")) {
+    osd_timeout = conf.get_val<std::chrono::seconds>("rados_osd_op_timeout");
   }
 }
 
@@ -4914,25 +4910,11 @@ Objecter::OSDSession::~OSDSession()
 
 Objecter::Objecter(CephContext *cct,
 		   Messenger *m, MonClient *mc,
-		   boost::asio::io_context& service,
-		   double mon_timeout_,
-		   double osd_timeout_) :
-  Dispatcher(cct), messenger(m), monc(mc), service(service),
-  mon_timeout(ceph::make_timespan(mon_timeout_)),
-  osd_timeout(ceph::make_timespan(osd_timeout_))
+		   boost::asio::io_context& service) :
+  Dispatcher(cct), messenger(m), monc(mc), service(service)
 {
-  ceph_assert(mon_timeout_ >= 0.0);
-  if (mon_timeout_ > 0.0) {
-    mon_timeout_configured = true;
-  } else {
-    mon_timeout = cct->_conf.get_val<std::chrono::seconds>("osdc_mon_timeout");
-  }
-  ceph_assert(osd_timeout_ >= 0.0);
-  if (osd_timeout_ > 0.0) {
-    osd_timeout_configured = true;
-  } else {
-    osd_timeout = cct->_conf.get_val<std::chrono::seconds>("osdc_osd_timeout");
-  }
+  mon_timeout = cct->_conf.get_val<std::chrono::seconds>("rados_mon_op_timeout");
+  osd_timeout = cct->_conf.get_val<std::chrono::seconds>("rados_osd_op_timeout");
 }
 
 Objecter::~Objecter()
