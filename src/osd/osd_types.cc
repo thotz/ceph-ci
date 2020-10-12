@@ -1534,6 +1534,7 @@ void pg_pool_t::dump(Formatter *f) const
   f->dump_int("type", get_type());
   f->dump_int("size", get_size());
   f->dump_int("min_size", get_min_size());
+  f->dump_int("primary_write_size", get_primary_write_size());
   f->dump_int("crush_rule", get_crush_rule());
   f->dump_int("peering_crush_bucket_count", peering_crush_bucket_count);
   f->dump_int("peering_crush_bucket_target", peering_crush_bucket_target);
@@ -2040,6 +2041,9 @@ void pg_pool_t::encode(ceph::buffer::list& bl, uint64_t features) const
     encode(peering_crush_bucket_barrier, bl);
     encode(peering_crush_mandatory_member, bl);
   }
+  if (v >= 31) {
+    encode(primary_write_size, bl);
+  }
   ENCODE_FINISH(bl);
 }
 
@@ -2225,6 +2229,11 @@ void pg_pool_t::decode(ceph::buffer::list::const_iterator& bl)
     decode(peering_crush_bucket_target, bl);
     decode(peering_crush_bucket_barrier, bl);
     decode(peering_crush_mandatory_member, bl);
+  } 
+  if (struct_v >= 31) {
+    decode(primary_write_size, bl);
+  } else {
+    primary_write_size = size;
   }
   DECODE_FINISH(bl);
   calc_pg_masks();
@@ -2338,6 +2347,7 @@ ostream& operator<<(ostream& out, const pg_pool_t& p)
   }
   out << " size " << p.get_size()
       << " min_size " << p.get_min_size()
+      << " primary_write_size " << p.get_primary_write_size()
       << " crush_rule " << p.get_crush_rule()
       << " object_hash " << p.get_object_hash_name()
       << " pg_num " << p.get_pg_num()
@@ -3966,6 +3976,8 @@ bool PastIntervals::is_new_interval(
   int new_size,
   int old_min_size,
   int new_min_size,
+  int old_primary_write_size,
+  int new_primary_write_size,
   unsigned old_pg_num,
   unsigned new_pg_num,
   unsigned old_pg_num_pending,
@@ -3988,6 +4000,7 @@ bool PastIntervals::is_new_interval(
     old_up_primary != new_up_primary ||
     new_up != old_up ||
     old_min_size != new_min_size ||
+    old_primary_write_size != new_primary_write_size ||
     old_size != new_size ||
     pgid.is_split(old_pg_num, new_pg_num, 0) ||
     // (is or was) pre-merge source
@@ -4042,6 +4055,8 @@ bool PastIntervals::is_new_interval(
 		    pi->size,
 		    plast->min_size,
 		    pi->min_size,
+        plast->primary_write_size,
+        pi->primary_write_size,
 		    plast->get_pg_num(),
 		    pi->get_pg_num(),
 		    plast->get_pg_num_pending(),
