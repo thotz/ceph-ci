@@ -2446,7 +2446,9 @@ public:
 				 boost::system::error_code>>> waiting_for_map;
 
   ceph::timespan mon_timeout;
+  bool mon_timeout_configured = false;
   ceph::timespan osd_timeout;
+  bool osd_timeout_configured = false;
 
   MOSDOp *_prepare_osd_op(Op *op);
   void _send_op(Op *op);
@@ -2575,9 +2577,7 @@ private:
 			     cct->_conf->objecter_inflight_ops)};
  public:
   Objecter(CephContext *cct, Messenger *m, MonClient *mc,
-	   boost::asio::io_context& service,
-	   double mon_timeout,
-	   double osd_timeout);
+	   boost::asio::io_context& service);
   ~Objecter() override;
 
   void init();
