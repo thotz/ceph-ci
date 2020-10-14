@@ -12044,7 +12044,6 @@ void PrimaryLogPG::on_shutdown()
   }
 
   m_scrubber->scrub_clear_state();
-  m_planned_scrub = requested_scrub_t{}; // RRR probably redundant
 
   m_scrubber->unreg_next_scrub();
 
