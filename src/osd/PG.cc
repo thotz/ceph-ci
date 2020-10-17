@@ -3866,13 +3866,20 @@ void PG::C_DeleteMore::complete(int r) {
     pg->osd->queue_for_pg_delete(pg->get_pgid(), epoch);
   }
   pg->unlock();
+  if (perf_counter) {
+    pg->get_perf_logger().tinc(perf_counter,
+      ceph::mono_clock::now() - start);
+  }
   delete this;
 }
 
-void PG::do_delete_work(ObjectStore::Transaction &t)
+void PG::do_delete_work(ObjectStore::Transaction &t,
+                        ceph::mono_clock::time_point start,
+                        ghobject_t* _next)
 {
   dout(10) << __func__ << dendl;
 
+  auto start0 = mono_clock::now();
   {
     float osd_delete_sleep = osd->osd->get_osd_delete_sleep();
     if (osd_delete_sleep > 0 && delete_needs_sleep) {
@@ -3903,8 +3910,13 @@ void PG::do_delete_work(ObjectStore::Transaction &t)
 
   vector<ghobject_t> olist;
   int max = std::min(osd->store->get_ideal_list_max(),
-		     (int)cct->_conf->osd_target_transaction_size);
+    (int)cct->_conf->osd_target_transaction_size);
+
   ghobject_t next;
+  if (_next) {
+    next = *_next;
+  }
+
   osd->store->collection_list(
     ch,
     next,
@@ -3913,6 +3925,22 @@ void PG::do_delete_work(ObjectStore::Transaction &t)
     &olist,
     &next);
   dout(20) << __func__ << " " << olist << dendl;
+
+  if (_next) {
+    // make sure we've removed everything
+    // by one more listing from the beginning
+    if (*_next != ghobject_t() && olist.empty()) {
+      next = ghobject_t();
+      osd->store->collection_list(
+        ch,
+        next,
+        ghobject_t::get_max(),
+        max,
+        &olist,
+        &next);
+    }
+    *_next = next;
+  }
 
   OSDriver::OSTransaction _t(osdriver.get_transaction(&t));
   int64_t num = 0;
@@ -3933,43 +3961,147 @@ void PG::do_delete_work(ObjectStore::Transaction &t)
   }
   if (num) {
     dout(20) << __func__ << " deleting " << num << " objects" << dendl;
-    Context *fin = new C_DeleteMore(this, get_osdmap_epoch());
+    Context *fin = new C_DeleteMore(this, get_osdmap_epoch(),
+      l_osd_deleting_commit_lat);
     t.register_on_commit(fin);
+    get_perf_logger().tinc(l_osd_deleting_submit_lat, mono_clock::now() - start0);
+
   } else {
-    dout(20) << __func__ << " finished" << dendl;
-    if (cct->_conf->osd_inject_failure_on_pg_removal) {
-      _exit(1);
-    }
+    do_remove_collection(start, t);
+  }
+}
 
-    // final flush here to ensure completions drop refs.  Of particular concern
-    // are the SnapMapper ContainerContexts.
-    {
+bool PG::can_do_reclaim()
+{
+  return cct->_conf.get_val<bool>("osd_delete_via_reclaim") &&
+      osd->store->collection_bulk_remove_lock(ch) == 0;
+}
+
+void PG::do_reclaim_work(ObjectStore::Transaction& t,
+  ceph::mono_clock::time_point start,
+  ghobject_t* _next)
+{
+  dout(10) << __func__ << dendl;
+  ceph_assert(_next);
+
+  auto start0 = mono_clock::now();
+  {
+    float osd_delete_sleep = osd->osd->get_osd_reclaim_sleep();
+    if (osd_delete_sleep > 0 && delete_needs_sleep) {
+      epoch_t e = get_osdmap()->get_epoch();
       PGRef pgref(this);
-      PGLog::clear_info_log(info.pgid, &t);
-      t.remove_collection(coll);
-      t.register_on_commit(new ContainerContext<PGRef>(pgref));
-      t.register_on_applied(new ContainerContext<PGRef>(pgref));
-      osd->store->queue_transaction(ch, std::move(t));
+      auto delete_requeue_callback = new LambdaContext([this, pgref, e](int r) {
+        dout(20) << __func__ << " wake up at "
+          << ceph_clock_now()
+          << ", re-queuing delete" << dendl;
+        std::scoped_lock locker{ *this };
+        delete_needs_sleep = false;
+        if (!pg_has_reset_since(e)) {
+          osd->queue_for_pg_delete(get_pgid(), e);
+        }
+        });
+
+      auto delete_schedule_time = ceph::real_clock::now();
+      delete_schedule_time += ceph::make_timespan(osd_delete_sleep);
+      std::lock_guard l{ osd->sleep_lock };
+      osd->sleep_timer.add_event_at(delete_schedule_time,
+        delete_requeue_callback);
+      dout(20) << __func__ << " Delete scheduled at " << delete_schedule_time << dendl;
+      return;
     }
-    ch->flush();
+  }
 
-    if (!osd->try_finish_pg_delete(this, pool.info.get_pg_num())) {
-      dout(1) << __func__ << " raced with merge, reinstantiating" << dendl;
-      ch = osd->store->create_new_collection(coll);
-      create_pg_collection(t,
-	      info.pgid,
-	      info.pgid.get_split_bits(pool.info.get_pg_num()));
-      init_pg_ondisk(t, info.pgid, &pool.info);
-      recovery_state.reset_last_persisted();
-    } else {
-      recovery_state.set_delete_complete();
+  delete_needs_sleep = true;
 
-      // cancel reserver here, since the PG is about to get deleted and the
-      // exit() methods don't run when that happens.
-      osd->local_reserver.cancel_reservation(info.pgid);
+  vector<ghobject_t> olist;
+  int max = std::min(osd->store->get_ideal_list_max(),
+    (int)cct->_conf->osd_target_transaction_size);
+  ghobject_t next;
+  next = *_next;
 
-      osd->logger->dec(l_osd_pg_removing);
+  osd->store->collection_list(
+    ch,
+    next,
+    ghobject_t::get_max(),
+    max,
+    &olist,
+    &next);
+  dout(20) << __func__ << " " << olist << dendl;
+
+  if (_next) {
+    *_next = next;
+  }
+
+  OSDriver::OSTransaction _t(osdriver.get_transaction(&t));
+  int64_t num = 0;
+  for (auto& oid : olist) {
+    if (oid == pgmeta_oid) {
+      continue;
     }
+    if (oid.is_pgmeta()) {
+      osd->clog->warn() << info.pgid << " found stray pgmeta-like " << oid
+        << " during PG removal";
+    }
+    int r = snap_mapper.remove_oid(oid.hobj, &_t);
+    if (r != 0 && r != -ENOENT) {
+      ceph_abort();
+    }
+
+    t.reclaim(coll, oid);
+    ++num;
+  }
+  if (num) {
+    dout(20) << __func__ << " truncating " << num << " objects" << dendl;
+    Context* fin = new C_DeleteMore(this, get_osdmap_epoch(),
+      l_osd_reclaiming_commit_lat);
+    t.register_on_commit(fin);
+    get_perf_logger().tinc(l_osd_reclaiming_submit_lat, mono_clock::now() - start0);
+  } else {
+    get_perf_logger().tinc(l_osd_pg_reclaim_lat, mono_clock::now() - start);
+    do_remove_collection(start, t);
+  }
+}
+
+void PG::do_remove_collection(ceph::mono_clock::time_point start,
+                              ObjectStore::Transaction& t)
+{
+  if (cct->_conf->osd_inject_failure_on_pg_removal) {
+    _exit(1);
+  }
+
+  // final flush here to ensure completions drop refs.  Of particular concern
+  // are the SnapMapper ContainerContexts.
+  {
+    PGRef pgref(this);
+    PGLog::clear_info_log(info.pgid, &t);
+    t.remove_collection(coll);
+    t.register_on_commit(new ContainerContext<PGRef>(pgref));
+    t.register_on_applied(new ContainerContext<PGRef>(pgref));
+    osd->store->queue_transaction(ch, std::move(t));
+  }
+  ch->flush();
+
+  if (!osd->try_finish_pg_delete(this, pool.info.get_pg_num())) {
+    dout(1) << __func__ << " raced with merge, reinstantiating" << dendl;
+    ch = osd->store->create_new_collection(coll);
+    create_pg_collection(t,
+      info.pgid,
+      info.pgid.get_split_bits(pool.info.get_pg_num()));
+    init_pg_ondisk(t, info.pgid, &pool.info);
+    recovery_state.reset_last_persisted();
+  }
+  else {
+    recovery_state.set_delete_complete();
+
+    // cancel reserver here, since the PG is about to get deleted and the
+    // exit() methods don't run when that happens.
+    osd->local_reserver.cancel_reservation(info.pgid);
+
+    osd->logger->dec(l_osd_pg_removing);
+    dout(10) << __func__ << " finished in "
+      << ceph::mono_clock::now() - start
+      << dendl;
+    get_perf_logger().tinc(l_osd_pg_remove_lat, mono_clock::now() - start);
   }
 }
 
