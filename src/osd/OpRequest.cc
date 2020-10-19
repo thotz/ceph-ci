@@ -127,9 +127,11 @@ void OpRequest::mark_flag_point(uint8_t flag, const char *s) {
   tracepoint(oprequest, mark_flag_point, reqid.name._type,
 	     reqid.name._num, reqid.tid, reqid.inc, op_info.get_flags(),
 	     flag, s, old_flags, hit_flag_points);
-  //auto marker_span = jaeger_tracing::child_span(s, OpRequest::osd_parent_span);
-//  auto marker_span = jaeger_tracing::new_span(s);
-//  jaeger_tracing::finish_span(marker_span);
+  if(OpRequest::osd_parent_span){
+    auto marker_span = jaeger_tracing::child_span(s, OpRequest::osd_parent_span);
+    //auto marker_span = jaeger_tracing::new_span(s);
+    //jaeger_tracing::finish_span(marker_span);
+  }
 }
 
 void OpRequest::mark_flag_point_string(uint8_t flag, const string& s) {
@@ -142,9 +144,11 @@ void OpRequest::mark_flag_point_string(uint8_t flag, const string& s) {
   tracepoint(oprequest, mark_flag_point, reqid.name._type,
 	     reqid.name._num, reqid.tid, reqid.inc, op_info.get_flags(),
 	     flag, s.c_str(), old_flags, hit_flag_points);
-  //auto marker_span = jaeger_tracing::child_span(s.c_str(), OpRequest::osd_parent_span);
-//  auto marker_span = jaeger_tracing::new_span(s.c_str());
-//  jaeger_tracing::finish_span(marker_span);
+  if(OpRequest::osd_parent_span){
+    auto marker_span = jaeger_tracing::child_span(s.c_str(), OpRequest::osd_parent_span);
+    //auto marker_span = jaeger_tracing::new_span(s);
+    //jaeger_tracing::finish_span(marker_span);
+  }
 }
 
 bool OpRequest::filter_out(const set<string>& filters)

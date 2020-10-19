@@ -2177,7 +2177,7 @@ fi
 %{_includedir}/cephfs/metrics/Types.h
 %{_libdir}/libcephfs.so
 
-%if %{with jaeger}
+%if 0%{with jaeger}
 %files -n libjaeger
 %{_libdir}/libopentracing.so.*
 %{_libdir}/libthrift.so.*
