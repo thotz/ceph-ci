@@ -34,9 +34,8 @@ bool MetricsHandler::ms_dispatch2(const ref_t<Message> &m) {
       m->get_connection()->get_peer_type() == CEPH_ENTITY_TYPE_CLIENT) {
     handle_client_metrics(ref_cast<MClientMetrics>(m));
     return true;
-  }
-  if (m->get_type() == MSG_MDS_PING &&
-      m->get_connection()->get_peer_type() == CEPH_ENTITY_TYPE_MDS) {
+  } else if (m->get_type() == MSG_MDS_PING &&
+             m->get_connection()->get_peer_type() == CEPH_ENTITY_TYPE_MDS) {
     const Message *msg = m.get();
     const MMDSOp *op = dynamic_cast<const MMDSOp*>(msg);
     if (!op)
@@ -45,7 +44,6 @@ bool MetricsHandler::ms_dispatch2(const ref_t<Message> &m) {
     handle_mds_ping(ref_cast<MMDSPing>(m));
     return true;
   }
-
   return false;
 }
 
