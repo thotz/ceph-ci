@@ -211,7 +211,16 @@ seastar::future<> ShardServices::send_pg_temp()
     }
     m->pg_temp.emplace(pgid, pg_temp.acting);
   }
-  return seastar::parallel_for_each(std::begin(ms), std::end(ms),
+  std::vector<seastar::future<>> fut_vec;
+  for (auto& m : ms) {
+    if (m) {
+      fut_vec.emplace_back(monc.send_message(m));
+    }
+  }
+  _sent_pg_temp();
+  return when_all_succeed(std::begin(fut_vec), std::end(fut_vec))
+	  .then([] { return seastar::now(); });
+/*  return seastar::parallel_for_each(std::begin(ms), std::end(ms),
     [this](auto m) {
       if (m) {
 	return monc.send_message(m);
@@ -220,7 +229,7 @@ seastar::future<> ShardServices::send_pg_temp()
       }
     }).then([this] {
       _sent_pg_temp();
-    });
+    });*/
 }
 
 void ShardServices::update_map(cached_map_t new_osdmap)
