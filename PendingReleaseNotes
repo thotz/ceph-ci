@@ -9,6 +9,12 @@
   * Similarly the date ranges and marker ranges have been removed on
     the RESTful DATALog and MDLog list and trim operations.
 
+* ceph-volume: The ``lvm batch` subcommand received a major rewrite. This closed
+  a number of bugs and improves usability in terms of size specification and
+  calculation, as well as idempotency behaviour and disk replacement process.
+  Please refer to https://docs.ceph.com/en/latest/ceph-volume/lvm/batch/ for
+  more detailed information.
+
 >=15.0.0
 --------
 
@@ -171,6 +177,10 @@
   and operate on specific Ceph file systems. The FS can be specificed using
   ``fsname`` in caps. This also affects subcommand ``fs authorize``, the caps
   produce by it will be specific to the FS name passed in its arguments.
+
+* fs: root_squash flag can be set in MDS caps. It disallows file system
+  operations that need write access for clients with uid=0 or gid=0. This
+  feature should prevent accidents such as an inadvertent `sudo rm -rf /<path>`.
 
 * fs: "fs authorize" now sets MON cap to "allow <perm> fsname=<fsname>"
       instead of setting it to "allow r" all the time.
