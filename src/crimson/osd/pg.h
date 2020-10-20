@@ -281,7 +281,9 @@ public:
     shard_services.remove_want_pg_temp(pgid.pgid);
   }
   void publish_stats_to_osd() final {
-    // Not needed yet
+    // crimson always run PG::get_stats when trying to publish stats,
+    // we call get_stats here just for making sure pg_info stats are updated.
+    get_stats();
   }
   void clear_publish_stats() final {
     // Not needed yet
