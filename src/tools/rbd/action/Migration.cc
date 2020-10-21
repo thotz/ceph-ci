@@ -1,12 +1,16 @@
 // -*- mode:C++; tab-width:8; c-basic-offset:2; indent-tabs-mode:t -*-
 // vim: ts=8 sw=2 smarttab
 
+#include "include/compat.h"
 #include "common/errno.h"
+#include "common/safe_io.h"
 
 #include "tools/rbd/ArgumentTypes.h"
 #include "tools/rbd/Shell.h"
 #include "tools/rbd/Utils.h"
 
+#include <sys/types.h>
+#include <fcntl.h>
 #include <iostream>
 #include <boost/program_options.hpp>
 
@@ -205,6 +209,94 @@ int execute_prepare(const po::variables_map &vm,
   return 0;
 }
 
+void get_import_prepare_arguments(po::options_description *positional,
+                                  po::options_description *options) {
+  positional->add_options()
+    ("source-spec-path", po::value<std::string>(),
+     "source-spec file (or '-' for stdin)");
+  options->add_options()
+    ("source-spec-path", po::value<std::string>(),
+     "source-spec file (or '-' for stdin)");
+
+  at::add_image_spec_options(positional, options, at::ARGUMENT_MODIFIER_DEST);
+  at::add_create_image_options(options, true);
+}
+
+int execute_import_prepare(
+    const po::variables_map &vm,
+    const std::vector<std::string> &ceph_global_init_args) {
+  size_t arg_index = 0;
+  int r;
+
+  std::string source_spec_path;
+  if (vm.count("source-spec-path")) {
+    source_spec_path = vm["source-spec-path"].as<std::string>();
+  } else {
+    source_spec_path = utils::get_positional_argument(vm, arg_index++);
+  }
+  if (source_spec_path.empty()) {
+    std::cerr << "rbd: source-spec path was not specified" << std::endl;
+    return -EINVAL;
+  }
+
+  int fd = STDIN_FILENO;
+  if (source_spec_path != "-") {
+    fd = open(source_spec_path.c_str(), O_RDONLY);
+    if (fd < 0) {
+      r = -errno;
+      std::cerr << "rbd: error opening " << source_spec_path << std::endl;
+      return r;
+    }
+  }
+
+  char source_spec[4096];
+  memset(source_spec, 0, sizeof(source_spec));
+  r = safe_read(fd, source_spec, sizeof(source_spec) - 1);
+  if (fd != STDIN_FILENO) {
+    VOID_TEMP_FAILURE_RETRY(close(fd));
+  }
+
+  if (r < 0) {
+    std::cerr << "rbd: error reading source-spec file: " << cpp_strerror(r)
+              << std::endl;
+    return r;
+  }
+
+  std::string dest_pool_name;
+  std::string dest_namespace_name;
+  std::string dest_image_name;
+  r = utils::get_pool_image_snapshot_names(
+    vm, at::ARGUMENT_MODIFIER_DEST, &arg_index, &dest_pool_name,
+    &dest_namespace_name, &dest_image_name, nullptr, false,
+    utils::SNAPSHOT_PRESENCE_NONE, utils::SPEC_VALIDATION_FULL);
+  if (r < 0) {
+    return r;
+  }
+
+  librbd::ImageOptions opts;
+  r = utils::get_image_options(vm, true, &opts);
+  if (r < 0) {
+    return r;
+  }
+
+  librados::Rados rados;
+  librados::IoCtx dest_io_ctx;
+  r = utils::init(dest_pool_name, dest_namespace_name, &rados, &dest_io_ctx);
+  if (r < 0) {
+    return r;
+  }
+
+  r = librbd::RBD().migration_prepare_import(source_spec, dest_io_ctx,
+                                             dest_image_name.c_str(), opts);
+  if (r < 0) {
+    std::cerr << "rbd: preparing import migration failed: " << cpp_strerror(r)
+              << std::endl;
+    return r;
+  }
+
+  return 0;
+}
+
 void get_execute_arguments(po::options_description *positional,
                            po::options_description *options) {
   at::add_image_spec_options(positional, options, at::ARGUMENT_MODIFIER_NONE);
@@ -319,6 +411,11 @@ int execute_commit(const po::variables_map &vm,
 Shell::Action action_prepare(
   {"migration", "prepare"}, {}, "Prepare image migration.",
   at::get_long_features_help(), &get_prepare_arguments, &execute_prepare);
+
+Shell::Action action_import_prepare(
+  {"migration", "prepare-import"}, {}, "Prepare import-only image migration.",
+  at::get_long_features_help(), &get_import_prepare_arguments,
+  &execute_import_prepare);
 
 Shell::Action action_execute(
   {"migration", "execute"}, {}, "Execute image migration.", "",

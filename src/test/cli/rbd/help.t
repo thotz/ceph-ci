@@ -79,6 +79,7 @@
       migration commit                  Commit image migration.
       migration execute                 Execute image migration.
       migration prepare                 Prepare image migration.
+      migration prepare-import          Prepare import-only image migration.
       mirror image demote               Demote an image to non-primary for RBD
                                         mirroring.
       mirror image disable              Disable RBD mirroring for an image.
@@ -1511,6 +1512,57 @@
     --journal-object-size arg size of journal objects [4K <= size <= 64M]
     --journal-pool arg        pool for journal objects
     --flatten                 fill clone with parent data (make it independent)
+  
+  Image Features:
+    (*) supports enabling/disabling on existing images
+    (-) supports disabling-only on existing images
+    (+) enabled by default for new images if features not specified
+  
+  rbd help migration prepare-import
+  usage: rbd migration prepare-import
+                                   [--source-spec-path <source-spec-path>] 
+                                   [--dest-pool <dest-pool>] 
+                                   [--dest-namespace <dest-namespace>] 
+                                   [--dest <dest>] 
+                                   [--image-format <image-format>] 
+                                   [--new-format] [--order <order>] 
+                                   [--object-size <object-size>] 
+                                   [--image-feature <image-feature>] 
+                                   [--image-shared] 
+                                   [--stripe-unit <stripe-unit>] 
+                                   [--stripe-count <stripe-count>] 
+                                   [--data-pool <data-pool>] 
+                                   [--mirror-image-mode <mirror-image-mode>] 
+                                   [--journal-splay-width <journal-splay-width>] 
+                                   [--journal-object-size <journal-object-size>] 
+                                   [--journal-pool <journal-pool>] 
+                                   <source-spec-path> <dest-image-spec> 
+  
+  Prepare import-only image migration.
+  
+  Positional arguments
+    <source-spec-path>        source-spec file (or '-' for stdin)
+    <dest-image-spec>         destination image specification
+                              (example: [<pool-name>/[<namespace>/]]<image-name>)
+  
+  Optional arguments
+    --source-spec-path arg    source-spec file (or '-' for stdin)
+    --dest-pool arg           destination pool name
+    --dest-namespace arg      destination namespace name
+    --dest arg                destination image name
+    --image-format arg        image format [default: 2]
+    --object-size arg         object size in B/K/M [4K <= object size <= 32M]
+    --image-feature arg       image features
+                              [layering(+), exclusive-lock(+*), object-map(+*),
+                              deep-flatten(+-), journaling(*)]
+    --image-shared            shared image
+    --stripe-unit arg         stripe unit in B/K/M
+    --stripe-count arg        stripe count
+    --data-pool arg           data pool
+    --mirror-image-mode arg   mirror image mode [journal or snapshot]
+    --journal-splay-width arg number of active journal objects
+    --journal-object-size arg size of journal objects [4K <= size <= 64M]
+    --journal-pool arg        pool for journal objects
   
   Image Features:
     (*) supports enabling/disabling on existing images
