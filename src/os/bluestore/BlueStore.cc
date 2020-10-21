@@ -1036,12 +1036,25 @@ struct LruOnodeCacheShard : public BlueStore::OnodeCacheShard {
     ++num_pinned;
     dout(20) << __func__ << this << " " << " " << " " << o->oid << " pinned" << dendl;
   }
-  void _unpin(BlueStore::Onode* o) override
+  void _unpin(BlueStore::Onode* o, bool trim) override
   {
-    lru.push_front(*o);
     ceph_assert(num_pinned);
     --num_pinned;
-    dout(20) << __func__ << this << " " << " " << " " << o->oid << " unpinned" << dendl;
+    if (!trim) {
+      lru.push_front(*o);
+      dout(20) << __func__ << this << " " << " " << " " << o->oid
+               << " unpinned "
+               << dendl;
+    } else {
+      auto unpinned = o->pop_cache();
+      ceph_assert(unpinned);
+      --num;
+      dout(20) << __func__ << this << " " << " " << " " << o->oid
+               << " unpinned and trimmed"
+               << dendl;
+      o->c->onode_map._remove(o->oid);
+      // onode might be removed beyond this point
+    }
   }
 
   void _trim_to(uint64_t new_size) override
@@ -1896,10 +1909,13 @@ bool BlueStore::OnodeSpace::map_any(std::function<bool(OnodeRef)> f)
 {
   std::lock_guard l(cache->lock);
   ldout(cache->cct, 20) << __func__ << dendl;
-  for (auto& i : onode_map) {
-    if (f(i.second)) {
+  auto i = onode_map.begin();
+  while (i != onode_map.end()) {
+    OnodeRef o = i->second;
+    if (f(o)) {
       return true;
     }
+    ++i;
   }
   return false;
 }
@@ -3475,20 +3491,25 @@ void BlueStore::Onode::get() {
   }
 }
 void BlueStore::Onode::put() {
-  if (--nref == 2) {
+  int nref_local = --nref;
+  if (nref_local == 2) {
     c->get_onode_cache()->unpin(this, [&]() {
         bool was_pinned = pinned;
         pinned = pinned && nref > 2; // intentionally use > not >= as we have
                                      // +1 due to pinned state
-        bool r = was_pinned && !pinned;
+        bool new_unpin = was_pinned && !pinned;
+        auto r = !cached || !new_unpin ?
+          OnodeCacheShard::UNPIN_SKIP :
+          exists ?
+            OnodeCacheShard::UNPIN_PROCEED_CACHING :
+              OnodeCacheShard::UNPIN_PROCEED_TRIM;
         // additional decrement for newly unpinned instance
-        if (r) {
-          --nref;
-        }
-        return cached && r;
+        if (new_unpin)
+          nref_local = --nref; // after this point Onode might be removed
+        return r;
       });
   }
-  if (nref == 0) {
+  if (nref_local == 0) {
     delete this;
   }
 }
@@ -4880,8 +4901,15 @@ void BlueStore::_init_logger()
     "Average omap iterator lower_bound call latency");
   b.add_time_avg(l_bluestore_omap_next_lat, "omap_next_lat",
     "Average omap iterator next call latency");
+  b.add_time_avg(l_bluestore_omap_get_keys_lat, "omap_get_keys_lat",
+    "Average omap get_keys call latency");
+  b.add_time_avg(l_bluestore_omap_get_values_lat, "omap_get_values_lat",
+    "Average omap get_values call latency");
   b.add_time_avg(l_bluestore_clist_lat, "clist_lat",
     "Average collection listing latency");
+  b.add_time_avg(l_bluestore_remove_lat, "remove_lat",
+    "Average removal latency");
+
   logger = b.create_perf_counters();
   cct->get_perfcounters_collection()->add(logger);
 }
@@ -10439,6 +10467,7 @@ int BlueStore::omap_get_keys(
   dout(15) << __func__ << " " << c->get_cid() << " oid " << oid << dendl;
   if (!c->exists)
     return -ENOENT;
+  auto start1 = mono_clock::now();
   std::shared_lock l(c->lock);
   int r = 0;
   OnodeRef o = c->get_onode(oid, false);
@@ -10470,6 +10499,12 @@ int BlueStore::omap_get_keys(
     }
   }
  out:
+  c->store->log_latency(
+    __func__,
+    l_bluestore_omap_get_keys_lat,
+    mono_clock::now() - start1,
+    c->store->cct->_conf->bluestore_log_omap_iterator_age);
+
   dout(10) << __func__ << " " << c->get_cid() << " oid " << oid << " = " << r
 	   << dendl;
   return r;
@@ -10487,6 +10522,7 @@ int BlueStore::omap_get_values(
   if (!c->exists)
     return -ENOENT;
   std::shared_lock l(c->lock);
+  auto start1 = mono_clock::now();
   int r = 0;
   string final_key;
   OnodeRef o = c->get_onode(oid, false);
@@ -10514,6 +10550,12 @@ int BlueStore::omap_get_values(
     }
   }
  out:
+  c->store->log_latency(
+    __func__,
+    l_bluestore_omap_get_values_lat,
+    mono_clock::now() - start1,
+    c->store->cct->_conf->bluestore_log_omap_iterator_age);
+
   dout(10) << __func__ << " " << c->get_cid() << " oid " << oid << " = " << r
 	   << dendl;
   return r;
@@ -11656,7 +11698,25 @@ void BlueStore::_kv_sync_thread()
   ceph_assert(!kv_sync_started);
   kv_sync_started = true;
   kv_cond.notify_all();
+
+  auto t0 = mono_clock::now();
+  timespan twait = ceph::make_timespan(0);
+  size_t kv_submitted = 0;
+
   while (true) {
+    auto period = cct->_conf->bluestore_kv_sync_util_logging_s;
+    auto observation_period =
+      ceph::make_timespan(period);
+    auto elapsed = mono_clock::now() - t0;
+    if (period && elapsed >= observation_period) {
+      dout(0) << __func__ << " utilization: idle "
+	      << twait << " of " << elapsed
+	      << ", submitted: " << kv_submitted
+	      <<dendl;
+      t0 = mono_clock::now();
+      twait = ceph::make_timespan(0);
+      kv_submitted = 0;
+    }
     ceph_assert(kv_committing.empty());
     if (kv_queue.empty() &&
 	((deferred_done_queue.empty() && deferred_stable_queue.empty()) ||
@@ -11664,8 +11724,11 @@ void BlueStore::_kv_sync_thread()
       if (kv_stop)
 	break;
       dout(20) << __func__ << " sleep" << dendl;
+      auto t = mono_clock::now();
       kv_sync_in_progress = false;
       kv_cond.wait(l);
+      twait += mono_clock::now() - t;
+
       dout(20) << __func__ << " wake" << dendl;
     } else {
       deque<TransContext*> kv_submitting;
@@ -11759,6 +11822,7 @@ void BlueStore::_kv_sync_thread()
       for (auto txc : kv_committing) {
 	throttle.log_state_latency(*txc, logger, l_bluestore_state_kv_queued_lat);
 	if (txc->get_state() == TransContext::STATE_KV_QUEUED) {
+	  ++kv_submitted; // FIXME minor: we might want to count ops in transactions
 	  _txc_apply_kv(txc, false);
 	  --txc->osr->kv_committing_serially;
 	} else {
@@ -14394,7 +14458,23 @@ int BlueStore::_remove(TransContext *txc,
   dout(15) << __func__ << " " << c->cid << " " << o->oid
 	   << " onode " << o.get()
 	   << " txc "<< txc << dendl;
+
+  auto start_time = mono_clock::now();
   int r = _do_remove(txc, c, o);
+  log_latency_fn(
+    __func__,
+    l_bluestore_remove_lat,
+    mono_clock::now() - start_time,
+    cct->_conf->bluestore_log_op_age,
+    [&](const ceph::timespan& lat) {
+      ostringstream ostr;
+      ostr << ", lat = " << timespan_str(lat)
+        << " cid =" << c->cid
+        << " oid =" << o->oid;
+      return ostr.str();
+    }
+  );
+
   dout(10) << __func__ << " " << c->cid << " " << o->oid << " = " << r << dendl;
   return r;
 }
