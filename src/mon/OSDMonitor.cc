@@ -5355,7 +5355,7 @@ void OSDMonitor::dump_info(Formatter *f)
 
 namespace {
   enum osd_pool_get_choices {
-    SIZE, MIN_SIZE,
+    SIZE, MIN_SIZE, PRIMARY_WRITE_SIZE,
     PG_NUM, PGP_NUM, CRUSH_RULE, HASHPSPOOL, EC_OVERWRITES,
     NODELETE, NOPGCHANGE, NOSIZECHANGE,
     WRITE_FADVISE_DONTNEED, NOSCRUB, NODEEP_SCRUB,
@@ -6066,6 +6066,7 @@ bool OSDMonitor::preprocess_command(MonOpRequestRef op)
     const choices_map_t ALL_CHOICES = {
       {"size", SIZE},
       {"min_size", MIN_SIZE},
+      {"primary_write_size", PRIMARY_WRITE_SIZE},
       {"pg_num", PG_NUM}, {"pgp_num", PGP_NUM},
       {"crush_rule", CRUSH_RULE}, {"hashpspool", HASHPSPOOL},
       {"allow_ec_overwrites", EC_OVERWRITES}, {"nodelete", NODELETE},
@@ -6198,6 +6199,9 @@ bool OSDMonitor::preprocess_command(MonOpRequestRef op)
 	  case MIN_SIZE:
 	    f->dump_int("min_size", p->get_min_size());
 	    break;
+    case PRIMARY_WRITE_SIZE:
+      f->dump_int("primary_write_size", p->get_primary_write_size());
+      break;
 	  case CRUSH_RULE:
 	    if (osdmap.crush->rule_exists(p->get_crush_rule())) {
 	      f->dump_string("crush_rule", osdmap.crush->get_rule_name(
@@ -6356,6 +6360,9 @@ bool OSDMonitor::preprocess_command(MonOpRequestRef op)
 	  case MIN_SIZE:
 	    ss << "min_size: " << p->get_min_size() << "\n";
 	    break;
+    case PRIMARY_WRITE_SIZE:
+      ss << "primary_write_size: " << p->get_primary_write_size() << "\n";
+      break;
 	  case CRUSH_RULE:
 	    if (osdmap.crush->rule_exists(p->get_crush_rule())) {
 	      ss << "crush_rule: " << osdmap.crush->get_rule_name(
@@ -7572,7 +7579,7 @@ int OSDMonitor::parse_erasure_code_profile(const vector<string> &erasure_code_pr
 int OSDMonitor::prepare_pool_size(const unsigned pool_type,
 				  const string &erasure_code_profile,
                                   uint8_t repl_size,
-				  unsigned *size, unsigned *min_size,
+				  unsigned *size, unsigned *min_size, unsigned *primary_write_size,
 				  ostream *ss)
 {
   int err = 0;
@@ -7596,6 +7603,7 @@ int OSDMonitor::prepare_pool_size(const unsigned pool_type,
     *size = repl_size;
     if (!set_min_size)
       *min_size = g_conf().get_osd_pool_default_min_size(repl_size);
+    *primary_write_size = g_conf().get_osd_pool_default_primary_write_size(repl_size, *min_size);
     break;
   case pg_pool_t::TYPE_ERASURE:
     {
@@ -7610,8 +7618,11 @@ int OSDMonitor::prepare_pool_size(const unsigned pool_type,
 	*min_size =
 	  erasure_code->get_data_chunk_count() +
 	  std::min<int>(1, erasure_code->get_coding_chunk_count() - 1);
+  *primary_write_size =
+    g_conf().get_osd_pool_default_primary_write_size(*size, *min_size);
 	assert(*min_size <= *size);
 	assert(*min_size >= erasure_code->get_data_chunk_count());
+  assert(*min_size <= *primary_write_size);
       }
     }
     break;
@@ -7861,9 +7872,9 @@ int OSDMonitor::prepare_new_pool(string& name,
     dout(10) << __func__ << " crush smoke test duration: "
              << duration << dendl;
   }
-  unsigned size, min_size;
+  unsigned size, min_size, primary_write_size;
   r = prepare_pool_size(pool_type, erasure_code_profile, repl_size,
-                        &size, &min_size, ss);
+                        &size, &min_size, &primary_write_size, ss);
   if (r) {
     dout(10) << "prepare_pool_size returns " << r << dendl;
     return r;
@@ -7935,6 +7946,7 @@ int OSDMonitor::prepare_new_pool(string& name,
 
   pi->size = size;
   pi->min_size = min_size;
+  pi->primary_write_size = primary_write_size;
   pi->crush_rule = crush_rule;
   pi->expected_num_objects = expected_num_objects;
   pi->object_hash = CEPH_STR_HASH_RJENKINS;
@@ -8141,6 +8153,7 @@ int OSDMonitor::prepare_command_pool_set(const cmdmap_t& cmdmap,
     }
     p.size = n;
     p.min_size = g_conf().get_osd_pool_default_min_size(p.size);
+    p.primary_write_size = g_conf().get_osd_pool_default_primary_write_size(p.size, p.min_size);
   } else if (var == "min_size") {
     if (p.has_flag(pg_pool_t::FLAG_NOSIZECHANGE)) {
       ss << "pool min size change is disabled; you must unset nosizechange flag for the pool first";
@@ -8174,6 +8187,23 @@ int OSDMonitor::prepare_command_pool_set(const cmdmap_t& cmdmap,
        }
     }
     p.min_size = n;
+    p.primary_write_size = g_conf().get_osd_pool_default_primary_write_size(p.size, p.min_size);
+  } else if (var == "primary_write_size") {
+    if (p.has_flag(pg_pool_t::FLAG_NOSIZECHANGE)) {
+      ss << "pool primary_write_size change is disabled; you must unset nosizechange flag for the pool first";
+      return -EPERM;
+    }
+    if (interr.length()) {
+      ss << "error parsing integer value '" << val << "': " << interr;
+      return -EINVAL;
+    }
+    if (n > p.size || n < p.min_size) {
+      ss << "pool primary_write_size must be between min_size, which is set to "
+        << (int)p.min_size << ", and size, which is set to " << (int)p.size;
+      return -EINVAL;
+    }
+
+    p.primary_write_size = n;
   } else if (var == "pg_num_actual") {
     if (interr.length()) {
       ss << "error parsing integer value '" << val << "': " << interr;
