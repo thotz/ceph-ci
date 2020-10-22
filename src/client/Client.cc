@@ -688,7 +688,6 @@ void Client::trim_dentry(Dentry *dn)
 		 << dendl;
   if (dn->inode) {
     Inode *diri = dn->dir->parent_inode;
-    diri->dir_release_count++;
     clear_dir_complete_and_ordered(diri, true);
   }
   unlink(dn, false, false);  // drop dir, drop dentry
@@ -998,13 +997,11 @@ Dentry *Client::insert_dentry_inode(Dir *dir, const string& dname, LeaseStat *dl
     if (old_dentry) {
       if (old_dentry->dir != dir) {
 	Inode *old_diri = old_dentry->dir->parent_inode;
-	old_diri->dir_ordered_count++;
 	clear_dir_complete_and_ordered(old_diri, false);
       }
       unlink(old_dentry, dir == old_dentry->dir, false);  // drop dentry, keep dir open if its the same dir
     }
     Inode *diri = dir->parent_inode;
-    diri->dir_ordered_count++;
     clear_dir_complete_and_ordered(diri, false);
     dn = link(dir, dname, in, dn);
   }
@@ -1031,6 +1028,8 @@ void Client::update_dentry_lease(Dentry *dn, LeaseStat *dlease, utime_t from, Me
     }
   }
   dn->cap_shared_gen = dn->dir->parent_inode->shared_gen;
+  if (dlease->mask & CEPH_LEASE_PRIMARY_LINK)
+    dn->mark_primary();
 }
 
 
@@ -1057,6 +1056,10 @@ void Client::update_dir_dist(Inode *in, DirStat *dst)
 
 void Client::clear_dir_complete_and_ordered(Inode *diri, bool complete)
 {
+  if (complete)
+    diri->dir_release_count++;
+  else
+    diri->dir_ordered_count++;
   if (diri->flags & I_COMPLETE) {
     if (complete) {
       ldout(cct, 10) << " clearing (I_COMPLETE|I_DIR_ORDERED) on " << *diri << dendl;
@@ -1261,7 +1264,6 @@ Inode* Client::insert_trace(MetaRequest *request, MetaSession *session)
     Dentry *d = request->dentry();
     if (d) {
       Inode *diri = d->dir->parent_inode;
-      diri->dir_release_count++;
       clear_dir_complete_and_ordered(diri, true);
     }
 
@@ -1349,7 +1351,6 @@ Inode* Client::insert_trace(MetaRequest *request, MetaSession *session)
       if (diri->dir && diri->dir->dentries.count(dname)) {
 	dn = diri->dir->dentries[dname];
 	if (dn->inode) {
-	  diri->dir_ordered_count++;
 	  clear_dir_complete_and_ordered(diri, false);
 	  unlink(dn, true, true);  // keep dir, dentry
 	}
@@ -2817,7 +2818,7 @@ void Client::send_reconnect(MetaSession *session)
 	       << " wants " << ccap_string(in->caps_wanted())
 	       << dendl;
       filepath path;
-      in->make_long_path(path);
+      in->make_short_path(path);
       ldout(cct, 10) << "    path " << path << dendl;
 
       bufferlist flockbl;
@@ -3104,7 +3105,6 @@ Dentry* Client::link(Dir *dir, const string& name, Inode *in, Dentry *dn)
       Dentry *olddn = in->get_first_parent();
       ceph_assert(olddn->dir != dir || olddn->name != name);
       Inode *old_diri = olddn->dir->parent_inode;
-      old_diri->dir_release_count++;
       clear_dir_complete_and_ordered(old_diri, true);
       unlink(olddn, true, true);  // keep dir, dentry
     }
@@ -4011,10 +4011,10 @@ void Client::check_cap_issue(Inode *in, unsigned issued)
       !(had & CEPH_CAP_FILE_CACHE))
     in->cache_gen++;
 
-  if ((issued & CEPH_CAP_FILE_SHARED) &&
-      !(had & CEPH_CAP_FILE_SHARED)) {
-    in->shared_gen++;
-
+  if ((issued & CEPH_CAP_FILE_SHARED) !=
+      (had & CEPH_CAP_FILE_SHARED)) {
+    if (issued & CEPH_CAP_FILE_SHARED)
+      in->shared_gen++;
     if (in->is_dir())
       clear_dir_complete_and_ordered(in, true);
   }
@@ -6410,6 +6410,8 @@ int Client::_lookup(Inode *dir, const string& dname, int mask, InodeRef *target,
 {
   int r = 0;
   Dentry *dn = NULL;
+  // can only request shared caps
+  mask &= CEPH_CAP_ANY_SHARED | CEPH_STAT_RSTAT;
 
   if (dname == "..") {
     if (dir->dentries.empty()) {
@@ -8580,11 +8582,13 @@ int Client::open(const char *relpath, int flags, const UserPerm& perms,
 		 mode_t mode, int stripe_unit, int stripe_count,
 		 int object_size, const char *data_pool)
 {
-  ldout(cct, 3) << "open enter(" << relpath << ", " << ceph_flags_sys2wire(flags) << "," << mode << ")" << dendl;
+  int cflags = ceph_flags_sys2wire(flags);
+
+  ldout(cct, 3) << "open enter(" << relpath << ", " << cflags << "," << mode << ")" << dendl;
   std::lock_guard lock(client_lock);
   tout(cct) << "open" << std::endl;
   tout(cct) << relpath << std::endl;
-  tout(cct) << ceph_flags_sys2wire(flags) << std::endl;
+  tout(cct) << cflags << std::endl;
 
   if (unmounting)
     return -ENOTCONN;
@@ -8604,7 +8608,9 @@ int Client::open(const char *relpath, int flags, const UserPerm& perms,
   bool created = false;
   /* O_CREATE with O_EXCL enforces O_NOFOLLOW. */
   bool followsym = !((flags & O_NOFOLLOW) || ((flags & O_CREAT) && (flags & O_EXCL)));
-  int r = path_walk(path, &in, perms, followsym, ceph_caps_for_mode(mode));
+  int mask = ceph_caps_for_mode(ceph_flags_to_mode(cflags));
+
+  int r = path_walk(path, &in, perms, followsym, mask);
 
   if (r == 0 && (flags & O_CREAT) && (flags & O_EXCL))
     return -EEXIST;
@@ -8657,7 +8663,7 @@ int Client::open(const char *relpath, int flags, const UserPerm& perms,
   
  out:
   tout(cct) << r << std::endl;
-  ldout(cct, 3) << "open exit(" << path << ", " << ceph_flags_sys2wire(flags) << ") = " << r << dendl;
+  ldout(cct, 3) << "open exit(" << path << ", " << cflags << ") = " << r << dendl;
   return r;
 }
 
