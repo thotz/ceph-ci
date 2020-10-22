@@ -14593,9 +14593,10 @@ void PrimaryLogPG::do_replica_scrub_map(OpRequestRef op)
 {
   dout(10) << __func__ << " is scrub active? " << m_scrubber->is_scrub_active() << dendl;
 
+  op->mark_started();
+
   if (!m_scrubber->is_scrub_active()) {
     dout(10) << __func__ << " scrub isn't active" << dendl;
-    /// RRR \todo ask whether we should mark op-start here
     return;
   }
   m_scrubber->map_from_replica(op);
