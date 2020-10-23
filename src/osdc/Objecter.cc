@@ -1201,16 +1201,8 @@ void Objecter::handle_osd_map(MOSDMap *m)
 	  logger->inc(l_osdc_map_full);
 	}
 	else {
-	  if (e >= m->get_oldest()) {
-	    ldout(cct, 3) << "handle_osd_map requesting missing epoch "
-			  << osdmap->get_epoch()+1 << dendl;
-	    _maybe_request_map();
-	    break;
-	  }
 	  ldout(cct, 3) << "handle_osd_map missing epoch "
-			<< osdmap->get_epoch()+1
-			<< ", jumping to " << m->get_oldest() << dendl;
-	  e = m->get_oldest() - 1;
+			<< e << dendl;
 	  skipped_map = true;
 	  continue;
 	}
@@ -1951,7 +1943,7 @@ void Objecter::_maybe_request_map()
     flag = CEPH_SUBSCRIBE_ONETIME;
   }
   epoch_t epoch = osdmap->get_epoch() ? osdmap->get_epoch()+1 : 0;
-  if (monc->sub_want("osdmap", epoch, flag)) {
+  if (monc->sub_want("osdmap", epoch, flag | CEPH_SUBSCRIBE_LATEST)) {
     monc->renew_subs();
   }
 }
