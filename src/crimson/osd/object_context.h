@@ -94,6 +94,13 @@ public:
     }
   }
 
+  void interrupt(std::exception_ptr&& eptr) {
+    lock.abort(std::move(eptr));
+    if (recovery_read_marker) {
+      drop_recovery_read();
+    }
+  }
+
 private:
   tri_mutex lock;
   bool recovery_read_marker = false;

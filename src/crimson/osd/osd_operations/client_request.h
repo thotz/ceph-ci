@@ -19,6 +19,7 @@ class ClientRequest final : public OperationT<ClientRequest> {
   Ref<MOSDOp> m;
   OpInfo op_info;
   OrderedPipelinePhase::Handle handle;
+  ObjectContextRef object_context_ref;
 
 public:
   class ConnectionPipeline {

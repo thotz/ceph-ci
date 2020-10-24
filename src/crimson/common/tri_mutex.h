@@ -118,6 +118,14 @@ public:
     }
   }
 
+  void abort(std::exception_ptr&& eptr) {
+    while (!waiters.empty()) {
+      auto& waiter = waiters.front();
+      waiter.pr.set_exception(std::move(eptr));
+      waiters.pop_front();
+    }
+  }
+
 private:
   void wake();
   unsigned readers = 0;

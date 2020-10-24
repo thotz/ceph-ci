@@ -104,6 +104,10 @@ seastar::future<> ClientRequest::start()
 	    try {
 	      std::rethrow_exception(eptr);
 	    } catch(::crimson::common::actingset_changed& e) {
+	      if (object_context_ref) {
+		object_context_ref->interrupt(e);
+		object_context_ref.reset();
+	      }
 	      if (e.is_primary()) {
 		logger().debug("{} operation restart, acting set changed", *this);
 		return seastar::stop_iteration::no;
@@ -114,7 +118,11 @@ seastar::future<> ClientRequest::start()
 	    }
 	  }
 	  assert(*eptr.__cxa_exception_type() ==
-	  typeid(crimson::common::system_shutdown_exception));
+	    typeid(crimson::common::system_shutdown_exception));
+	  if (object_context_ref) {
+	    object_context_ref->interrupt(std::move(eptr));
+	    object_context_ref.reset();
+	  }
 	  crimson::get_logger(ceph_subsys_osd).debug(
 	      "{} operation skipped, system shutdown", *this);
 	  return seastar::stop_iteration::yes;
@@ -162,6 +170,7 @@ ClientRequest::process_op(
     logger().debug("{} to do ops", *this);
     op_info.set_from_op(&*m, *pg.get_osdmap());
     return pg.with_locked_obc(m, op_info, this, [this, &pg](auto obc) {
+      object_context_ref = obc;
       return with_blocking_future_interruptible<IOInterruptCondition>(
         handle.enter(pp(pg).process)
       ).then_interruptible([this, &pg, obc]()
