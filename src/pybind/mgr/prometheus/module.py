@@ -11,6 +11,7 @@ import time
 from mgr_module import MgrModule, MgrStandbyModule, CommandResult, PG_STATES
 from mgr_util import get_default_addr, profile_method
 from rbd import RBD
+from collections import namedtuple
 try:
     from typing import Optional, Dict, Any, Set
 except:
@@ -108,11 +109,9 @@ DISK_OCCUPATION = ('ceph_daemon', 'device', 'db_device',
 
 NUM_OBJECTS = ['degraded', 'misplaced', 'unfound']
 
+alert_metric = namedtuple('alert_metric', 'name description')
 HEALTH_CHECKS = [
-    {
-        "name": 'SLOW_OPS',
-        "description": 'OSD requests taking a long time to process',
-    },
+    alert_metric('SLOW_OPS', 'OSD requests taking a long time to process' ),
 ]
 
 
@@ -440,11 +439,11 @@ class Module(MgrModule):
             )
 
         for check in HEALTH_CHECKS:
-            path = 'healthcheck_{}'.format(check['name'].lower())
+            path = 'healthcheck_{}'.format(check.name.lower())
             metrics[path] = Metric(
                 'gauge',
                 path,
-                check['description'],
+                check.description,
             )
 
         return metrics
@@ -452,7 +451,7 @@ class Module(MgrModule):
     @profile_method()
     def get_health(self):
 
-        def _get_value(message, delim=" ", word_pos=0):
+        def _get_value(message, delim=' ', word_pos=0):
             """Extract value from message (default is 1st field)"""
             v_str = message.split(delim)[word_pos]
             if v_str.isdigit():
@@ -471,20 +470,22 @@ class Module(MgrModule):
         active_names = active_healthchecks.keys()
 
         # healthcheck metrics must always be present in the scrape
-        for healthcheck in HEALTH_CHECKS:
+        for check in HEALTH_CHECKS:
             v = 0
             err = 0
 
-            check_name = healthcheck['name']
-            if check_name in active_names:
-                check_data = active_healthchecks[check_name]
+            if check.name in active_names:
+                check_data = active_healthchecks[check.name]
                 message = check_data['summary'].get('message', '')
-                if check_name == "SLOW_OPS":
+                if check.name == "SLOW_OPS":
+                    # 42 slow ops, oldest one blocked for 12 sec, daemons [osd.0, osd.3] have slow ops.
                     v, err = _get_value(message)
-                if err:
-                    self.log.warning("healthcheck {} message format has changed and is incompatible".format(check_name))
 
-            path = 'healthcheck_{}'.format(check_name.lower())
+                # if we get an error, we pass a warning to the log, and carry on.
+                if err:
+                    self.log.warning("healthcheck {} message format has changed and is incompatible".format(check.name))
+
+            path = 'healthcheck_{}'.format(check.name.lower())
             self.metrics[path].set(v)
 
     @profile_method()
