@@ -22,16 +22,17 @@ function(build_jaeger)
 
   file(MAKE_DIRECTORY "${Jaeger_INSTALL_DIR}")
   set(Jaeger_CMAKE_ARGS -DCMAKE_POSITION_INDEPENDENT_CODE=ON
-                        -DBUILD_SHARED_LIBS=ON
-                        -DHUNTER_ENABLED=OFF
-                        -DBUILD_TESTING=OFF
-                        -DJAEGERTRACING_BUILD_EXAMPLES=OFF
-                        -DCMAKE_PREFIX_PATH=${CMAKE_BINARY_DIR}/external
-                        -DCMAKE_INSTALL_RPATH=${CMAKE_BINARY_DIR}/external
-                       -DCMAKE_INSTALL_RPATH_USE_LINK_PATH=TRUE
+			-DBUILD_SHARED_LIBS=ON
+			-DHUNTER_ENABLED=OFF
+			-DBUILD_TESTING=OFF
+			-DJAEGERTRACING_BUILD_EXAMPLES=OFF
+			-DCMAKE_PREFIX_PATH=${CMAKE_BINARY_DIR}/external
+			-DCMAKE_INSTALL_RPATH=${CMAKE_BINARY_DIR}/external
+			-DCMAKE_INSTALL_RPATH_USE_LINK_PATH=TRUE
+			-Dopentracing_DIR=${CMAKE_SOURCE_DIR}/src/jaegertracing/opentracing-cpp
 			-Dnlohmann_json_DIR=/usr/lib
 			-DCMAKE_INSTALL_PREFIX=${CMAKE_BINARY_DIR}/external
-			-DCMAKE_FIND_ROOT_PATH="${CMAKE_BINARY_DIR}/external"
+			-DCMAKE_FIND_ROOT_PATH="${CMAKE_BINARY_DIR}/external;${CMAKE_BINARY_DIR}/boost;${CMAKE_BINARY_DIR}/boost/include"
 			-DCMAKE_INSTALL_LIBDIR=${CMAKE_BINARY_DIR}/external/lib)
 
   set(dependencies opentracing thrift)
