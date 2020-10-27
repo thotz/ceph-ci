@@ -139,7 +139,6 @@ class CephFSTestCase(CephTestCase):
         self.mds_cluster.delete_all_filesystems()
         self.mds_cluster.mds_restart() # to reset any run-time configs, etc.
         self.fs = None # is now invalid!
-        self.backup_fs = None
         self.recovery_fs = None
 
         # In case anything is in the OSD blocklist list, clear it out.  This is to avoid
@@ -187,12 +186,13 @@ class CephFSTestCase(CephTestCase):
 
         if self.REQUIRE_BACKUP_FILESYSTEM:
             if not self.REQUIRE_FILESYSTEM:
-                self.skipTest("backup filesystem requires a primary filesystem as well")
+                self.skipTest("Backup filesystem requires a primary filesystem as well")
             self.fs.mon_manager.raw_cluster_cmd('fs', 'flag', 'set',
                                                 'enable_multiple', 'true',
                                                 '--yes-i-really-mean-it')
-            self.backup_fs = self.mds_cluster.newfs(name="backup_fs")
-            self.fs.wait_for_daemons()
+            self.backup_fs = self.mds_cluster.newfs(name=self.backup_mounts[0].cephfs_name)
+            self.backup_fs.wait_for_daemons()
+            self.backup_mounts[0].mount_wait()
 
         if self.REQUIRE_RECOVERY_FILESYSTEM:
             if not self.REQUIRE_FILESYSTEM:
@@ -220,6 +220,8 @@ class CephFSTestCase(CephTestCase):
         self.mds_cluster.clear_firewall()
         for m in self.mounts:
             m.teardown()
+
+        self.backup_mounts[0].teardown()
 
         for m, md in zip(self.mounts, self._orig_mount_details):
             md.restore(m)

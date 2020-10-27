@@ -145,6 +145,7 @@ def task(ctx, config):
     decorating_loader = DecoratingLoader({
         "ctx": ctx,
         "mounts": mounts,
+        "backup_mounts": ctx.backup_mounts,
         "fs": fs,
         "ceph_cluster": ceph_cluster,
         "mds_cluster": mds_cluster,

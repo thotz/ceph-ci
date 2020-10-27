@@ -107,6 +107,7 @@ def task(ctx, config):
     clients = list(teuthology.get_clients(ctx=ctx, roles=filter(lambda x: 'client.' in x, config.keys())))
 
     all_mounts = getattr(ctx, 'mounts', {})
+    backup_mounts = []
     mounted_by_me = {}
     skipped = {}
     remotes = set()
@@ -130,7 +131,11 @@ def task(ctx, config):
         if id_ not in all_mounts:
             fuse_mount = FuseMount(ctx=ctx, client_config=client_config,
                                    test_dir=testdir, client_id=auth_id,
-                                   client_remote=remote, brxnet=brxnet)
+                                   client_remote=remote, brxnet=brxnet,
+                                   cephfs_name=client_config.get('name', None))
+            if client_config.get('is_backup_fs', False):
+                backup_mounts.append(fuse_mount)
+                assert len(backup_mounts) == 1 # support single backup filesystem mount
             all_mounts[id_] = fuse_mount
         else:
             # Catch bad configs where someone has e.g. tried to use ceph-fuse and kcephfs for the same client
@@ -140,6 +145,7 @@ def task(ctx, config):
             mounted_by_me[id_] = {"config": client_config, "mount": all_mounts[id_]}
 
     ctx.mounts = all_mounts
+    ctx.backup_mounts = backup_mounts
 
     # Umount any pre-existing clients that we have not been asked to mount
     for client_id in set(all_mounts.keys()) - set(mounted_by_me.keys()) - set(skipped.keys()):

@@ -23,6 +23,7 @@ class TestMirroring(CephFSTestCase):
         self.primary_fs_id = self.fs.id
         self.secondary_fs_name = self.backup_fs.name
         self.enable_mirroring_module()
+        log.debug(f'>>> primary {self.primary_fs_name} secondary {self.secondary_fs_name}')
 
     def tearDown(self):
         self.disable_mirroring_module()
@@ -410,3 +411,6 @@ class TestMirroring(CephFSTestCase):
         self.assertTrue(peers_1, peers_2)
 
         self.disable_mirroring(self.primary_fs_name, self.primary_fs_id)
+
+    def test_cephfs_mirror_check_stats(self):
+        log.debug(f'<<< backup mount {self.backup_mounts[0]}')
