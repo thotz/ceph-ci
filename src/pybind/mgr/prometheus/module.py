@@ -111,7 +111,7 @@ NUM_OBJECTS = ['degraded', 'misplaced', 'unfound']
 
 alert_metric = namedtuple('alert_metric', 'name description')
 HEALTH_CHECKS = [
-    alert_metric('SLOW_OPS', 'OSD requests taking a long time to process' ),
+    alert_metric('SLOW_OPS', 'OSD or Monitor requests taking a long time to process' ),
 ]
 
 
@@ -469,24 +469,30 @@ class Module(MgrModule):
         active_healthchecks = health.get('checks', {})
         active_names = active_healthchecks.keys()
 
-        # healthcheck metrics must always be present in the scrape
         for check in HEALTH_CHECKS:
-            v = 0
-            err = 0
-
-            if check.name in active_names:
-                check_data = active_healthchecks[check.name]
-                message = check_data['summary'].get('message', '')
-                if check.name == "SLOW_OPS":
-                    # 42 slow ops, oldest one blocked for 12 sec, daemons [osd.0, osd.3] have slow ops.
-                    v, err = _get_value(message)
-
-                # if we get an error, we pass a warning to the log, and carry on.
-                if err:
-                    self.log.warning("healthcheck {} message format has changed and is incompatible".format(check.name))
-
             path = 'healthcheck_{}'.format(check.name.lower())
-            self.metrics[path].set(v)
+
+            if path in self.metrics:
+
+                if check.name in active_names:
+                    check_data = active_healthchecks[check.name]
+                    message = check_data['summary'].get('message', '')
+                    v, err = 0, 0
+
+                    if check.name == "SLOW_OPS":
+                        # 42 slow ops, oldest one blocked for 12 sec, daemons [osd.0, osd.3] have slow ops.
+                        v, err = _get_value(message)
+
+                    if err:
+                        self.log.error("healthcheck {} message format is incompatible and has been dropped".format(check.name))
+                        # drop the metric, so it's no longer emitted
+                        del self.metrics[path]
+                        continue
+                    else:
+                        self.metrics[path].set(v)
+                else:
+                    # health check is not active, so give it a default of 0
+                    self.metrics[path].set(0)
 
     @profile_method()
     def get_pool_stats(self):
