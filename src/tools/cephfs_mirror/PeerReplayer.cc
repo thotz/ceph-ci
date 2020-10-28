@@ -237,13 +237,14 @@ void PeerReplayer::add_directory(string_view dir_path) {
 
 void PeerReplayer::remove_directory(string_view dir_path) {
   dout(20) << ": dir_path=" << dir_path << dendl;
+  auto _dir_path = std::string(dir_path);
 
   std::scoped_lock locker(m_lock);
-  auto it = std::find(m_directories.begin(), m_directories.end(), dir_path);
+
+  auto it = std::find(m_directories.begin(), m_directories.end(), _dir_path);
   if (it != m_directories.end()) {
     m_directories.erase(it);
   }
-  auto _dir_path = std::string(dir_path);
   if (m_registered.find(_dir_path) == m_registered.end()) {
     m_snap_sync_stats.erase(_dir_path);
   }
@@ -285,11 +286,15 @@ int PeerReplayer::register_directory(std::string_view dir_path,
 void PeerReplayer::unregister_directory(std::string_view dir_path) {
   dout(20) << ": dir_path=" << dir_path << dendl;
 
-  auto it = m_registered.find(std::string(dir_path));
+  auto _dir_path = std::string(dir_path);
+  auto it = m_registered.find(_dir_path);
   ceph_assert(it != m_registered.end());
 
   unlock_directory(it->first, it->second);
-  m_registered.erase(std::string(dir_path));
+  m_registered.erase(it);
+  if (std::find(m_directories.begin(), m_directories.end(), _dir_path) == m_directories.end()) {
+    m_snap_sync_stats.erase(_dir_path);
+  }
 }
 
 int PeerReplayer::try_lock_directory(std::string_view dir_path,
