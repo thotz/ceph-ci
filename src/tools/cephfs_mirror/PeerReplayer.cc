@@ -285,11 +285,15 @@ int PeerReplayer::register_directory(std::string_view dir_path,
 void PeerReplayer::unregister_directory(std::string_view dir_path) {
   dout(20) << ": dir_path=" << dir_path << dendl;
 
-  auto it = m_registered.find(std::string(dir_path));
+  auti _dir_path = std::string(dir_path)
+  auto it = m_registered.find(dir_path);
   ceph_assert(it != m_registered.end());
 
   unlock_directory(it->first, it->second);
-  m_registered.erase(std::string(dir_path));
+  m_registered.erase(it);
+  if (!m_directories.count(_dir_path)) {
+    m_snap_sync_stats.erase(_dir_path);
+  }
 }
 
 int PeerReplayer::try_lock_directory(std::string_view dir_path,
