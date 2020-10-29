@@ -1,0 +1,10 @@
+meta:
+- desc: |
+   rgw reshard final
+workload:
+  full_sequential:
+    - workunit:
+        clients:
+          client.0:
+            - rgw/run-reshard.sh
+    - print: "**** done rgw reshard 2-final"
