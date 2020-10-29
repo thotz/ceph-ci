@@ -504,7 +504,7 @@ to monitor and manage many aspects of a Ceph cluster and related components.
 See the Dashboard documentation at http://docs.ceph.com/ for details and a
 detailed feature overview.
 
-%if 0%{?fedora} || %{?is_opensuse}
+%if 0%{?fedora} || 0%{?is_opensuse}
 %package mgr-diskprediction-local
 Summary:        Ceph Manager module for predicting disk failures
 BuildArch:      noarch
@@ -1605,7 +1605,7 @@ if [ $1 -eq 1 ] ; then
     /usr/bin/systemctl try-restart ceph-mgr.target >/dev/null 2>&1 || :
 fi
 
-%if 0%{?fedora} || %{?is_opensuse}
+%if 0%{?fedora} || 0%{?is_opensuse}
 %files mgr-diskprediction-local
 %{_datadir}/ceph/mgr/diskprediction_local
 %endif
