@@ -212,6 +212,7 @@ TEST(PerfCounters, ResetPerfCounters) {
 enum {
   TEST_PERFCOUNTERS3_ELEMENT_FIRST = 400,
   TEST_PERFCOUNTERS3_ELEMENT_READ,
+  TEST_PERFCOUNTERS3_ELEMENT_COUNT,
   TEST_PERFCOUNTERS3_ELEMENT_LAST,
 };
 
@@ -219,6 +220,7 @@ static std::shared_ptr<PerfCounters> setup_test_perfcounter3(CephContext* cct) {
   PerfCountersBuilder bld(cct, "test_percounter_3",
       TEST_PERFCOUNTERS3_ELEMENT_FIRST, TEST_PERFCOUNTERS3_ELEMENT_LAST);
   bld.add_time_avg(TEST_PERFCOUNTERS3_ELEMENT_READ, "read_avg");
+  bld.add_u64_counter(TEST_PERFCOUNTERS3_ELEMENT_COUNT, "counter", "count number");
   std::shared_ptr<PerfCounters> p(bld.create_perf_counters());
   return p;
 }
@@ -252,4 +254,20 @@ TEST(PerfCounters, read_avg) {
   std::thread t2(counters_readavg_test, fake_pf);
   t2.join();
   t1.join();
+}
+
+TEST(PerfCounters, DecrementTest) {
+  std::shared_ptr<PerfCounters> fake_pf = setup_test_perfcounter3(g_ceph_context);
+  int i = 100000;
+  fake_pf->set(TEST_PERFCOUNTERS3_ELEMENT_COUNT, i);
+
+  while (i--) {
+    fake_pf->dec(TEST_PERFCOUNTERS3_ELEMENT_COUNT);
+  }
+  // Should be at zero
+  ASSERT_EQ(fake_pf->get(TEST_PERFCOUNTERS3_ELEMENT_COUNT), 0);
+
+  // Try one more. Should still be at zero
+  fake_pf->dec(TEST_PERFCOUNTERS3_ELEMENT_COUNT);
+  ASSERT_EQ(fake_pf->get(TEST_PERFCOUNTERS3_ELEMENT_COUNT), 0);
 }
