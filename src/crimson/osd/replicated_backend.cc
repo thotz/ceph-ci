@@ -81,7 +81,8 @@ ReplicatedBackend::_submit_transaction(std::set<pg_shard_t>&& pg_shards,
         // TODO: set more stuff. e.g., pg_states
         return shard_services.send_to_osd(pg_shard.osd, std::move(m), map_epoch);
       }
-    }).then_interruptible([this, peers=pending_txn->second.weak_from_this()] {
+    }).then_interruptible(
+      [this, peers=pending_txn->second.weak_from_this()] {
       if (!peers) {
 	// for now, only actingset_changed can cause peers
 	// to be nullptr
@@ -90,10 +91,11 @@ ReplicatedBackend::_submit_transaction(std::set<pg_shard_t>&& pg_shards,
       }
       if (--peers->pending == 0) {
         peers->all_committed.set_value();
+	peers->all_committed = {};
+	return seastar::now();
       }
       return peers->all_committed.get_future();
     }).then_interruptible([pending_txn, this] {
-      pending_txn->second.all_committed = {};
       auto acked_peers = std::move(pending_txn->second.acked_peers);
       pending_trans.erase(pending_txn);
       return seastar::make_ready_future<crimson::osd::acked_peers_t>(std::move(acked_peers));
@@ -122,7 +124,8 @@ void ReplicatedBackend::got_rep_op_reply(const MOSDRepOpReply& reply)
     if (peer.shard == reply.from) {
       peer.last_complete_ondisk = reply.get_last_complete_ondisk();
       if (--peers.pending == 0) {
-        peers.all_committed.set_value();    
+        peers.all_committed.set_value();
+	peers.all_committed = {};
       }
       return;
     }

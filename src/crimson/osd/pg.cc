@@ -818,7 +818,7 @@ PG::get_or_load_head_obc(hobject_t oid)
 
   ceph_assert(oid.is_head());
   auto [obc, existed] = shard_services.obc_registry.get_cached_obc(oid);
-  if (existed) {
+  if (existed && obc->obs.exists) {
     logger().debug(
       "{}: found {} in cache",
       __func__,
