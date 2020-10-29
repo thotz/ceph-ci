@@ -301,7 +301,8 @@ def main():
     for i in range(0, num_objs):
         connection.Object(BUCKET_NAME2, ('key' + str(i))).put(Body=b"some_data")
 
-    #retry reshard
+    #retry reshard after 60 sec
+    time.sleep(60)
     run_bucket_reshard_cmd(BUCKET_NAME2, num_shards_expected)
 
     #TESTCASE 'manual bucket resharding','inject crash','fail','check bucket accessibility', 'retry reshard'
@@ -325,7 +326,8 @@ def main():
     for i in range(0, num_objs):
         connection.Object(BUCKET_NAME3, ('key' + str(i))).put(Body=b"some_data")
 
-    #retry reshard
+    #retry reshard after 60 sec
+    time.sleep(60)
     run_bucket_reshard_cmd(BUCKET_NAME3, num_shards_expected)
 
     #TESTCASE 'manual bucket resharding','inject error','fail','check bucket accessibility', 'retry reshard'
@@ -349,7 +351,8 @@ def main():
     for i in range(0, num_objs):
         connection.Object(BUCKET_NAME4, ('key' + str(i))).put(Body=b"some_data")
 
-    #retry reshard
+    #retry reshard after 60 sec
+    time.sleep(60)
     run_bucket_reshard_cmd(BUCKET_NAME4, num_shards_expected)
 
     # TESTCASE 'versioning reshard-','bucket', reshard','versioning reshard','succeeds'
