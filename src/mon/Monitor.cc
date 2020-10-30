@@ -2831,7 +2831,15 @@ void Monitor::do_health_to_clog(bool force)
       summary == health_status_cache.summary &&
       level == health_status_cache.overall)
     return;
-  clog->health(level) << "overall " << summary;
+
+  if (summary != health_status_cache.summary &&
+      level != HEALTH_OK) {
+    string details;
+    level = healthmon()->get_health_status(true, nullptr, &details);
+    clog->health(level) << "Health detail: " << details;
+  } else {
+    clog->health(level) << "overall " << summary;
+  }
   health_status_cache.summary = summary;
   health_status_cache.overall = level;
 }
