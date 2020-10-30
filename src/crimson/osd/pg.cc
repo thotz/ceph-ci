@@ -839,6 +839,8 @@ PG::get_or_load_head_obc(hobject_t oid)
         std::pair<crimson::osd::ObjectContextRef, bool>>(
           std::make_pair(std::move(obc), false)
         );
+    }).finally_interruptible<false>([obc] {
+      obc->degrade_excl_to(RWState::RWNONE);
     });
   }
 }
@@ -880,16 +882,11 @@ PG::get_locked_obc(
     -> interruptible_load_obc_ertr::future<ObjectContextRef>{
       auto &[head_obc, head_existed] = p;
       if (oid.is_head()) {
-	if (head_existed) {
-	  return interruptor::make_interruptible(head_obc->get_lock_type(op, type))
-	  .then_interruptible([head_obc=head_obc] {
-	    ceph_assert(head_obc->loaded);
-	    return load_obc_ertr::make_ready_future<ObjectContextRef>(head_obc);
-	  });
-	} else {
-	  head_obc->degrade_excl_to(type);
+	return interruptor::make_interruptible(head_obc->get_lock_type(op, type))
+	.then_interruptible([head_obc=head_obc] {
+	  ceph_assert(head_obc->loaded);
 	  return load_obc_ertr::make_ready_future<ObjectContextRef>(head_obc);
-	}
+	});
       } else {
 	return interruptor::make_interruptible(head_obc->get_lock_type(op, RWState::RWREAD))
 	  .then_interruptible(

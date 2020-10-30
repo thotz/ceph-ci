@@ -311,10 +311,15 @@ public:
       assert(interrupt_cond<InterruptCond>);
       return core_type::then_wrapped(
 	[func=std::forward<Func>(func),
-	interrupt_condition=interrupt_cond<InterruptCond>](auto&& fut) mutable {
+	interrupt_condition=interrupt_cond<InterruptCond>](auto&& result) mutable {
 	  return call_with_interruption(
 		    interrupt_condition,
-		    std::move(func));
+		    std::move(func)).then_wrapped(
+	    [result=std::move(result)](auto&& f_res) {
+	    // TODO: f_res.failed()
+	    f_res.discard_result();
+	    return std::move(result);
+	  });
       });
     } else {
       return core_type::finally(std::forward<Func>(func));
@@ -562,6 +567,34 @@ public:
       ::crimson::composer(
 	std::forward<ErrorFuncHead>(error_func_head),
 	std::forward<ErrorFuncTail>(error_func_tail)...));
+  }
+  template <bool may_interrupt = true, typename Func>
+  [[gnu::always_inline]]
+  auto finally_interruptible(Func&& func) {
+    if constexpr (may_interrupt) {
+      static_assert("not implemented yet!");
+    } else {
+      auto fut = core_type::finally(std::forward<Func>(func));
+      return (interrupt_futurize_t<decltype(fut)>)(std::move(fut));
+    }
+  }
+
+  template <typename Handler>
+  auto on_interruption(Handler&& handler) {
+    auto fut = core_type::then_wrapped(
+      [handler=std::forward<Handler>(handler),
+      interrupt_condition=interrupt_cond<InterruptCond>](auto fut) {
+      if (fut.failed()) {
+	std::exception_ptr ex = fut.get_exception();
+	if (interrupt_condition->is_interruption(ex)) {
+	  handler();
+	}
+	return core_type::errorator_type::template make_exception_future2<T...>(std::move(ex));
+      } else {
+	return static_cast<core_type&&>(std::move(fut));
+      }
+    });
+    return (interrupt_futurize_t<decltype(fut)>)(std::move(fut));
   }
 private:
   ErroratedFuture<::crimson::errorated_future_marker<T...>>

@@ -135,10 +135,6 @@ ReplicatedRecoveryBackend::load_obc_for_recovery(
     auto& [obc, existed] = p;
     logger().debug("load_obc_for_recovery: loaded obc: {}", obc->obs.oi.soid);
     recovery_waiter.obc = obc;
-    if (!existed) {
-      // obc is loaded with excl lock
-      recovery_waiter.obc->put_lock_type(RWState::RWEXCL);
-    }
     return recovery_waiter.obc->wait_recovery_read();
   }, crimson::osd::PG::load_obc_ertr::all_same_way(
       [this, &recovery_waiter, soid](const std::error_code& e) {
@@ -147,8 +143,6 @@ ReplicatedRecoveryBackend::load_obc_for_recovery(
       logger().debug("load_obc_for_recovery: load failure of obc: {}",
 	  obc->obs.oi.soid);
       recovery_waiter.obc = obc;
-      // obc is loaded with excl lock
-      recovery_waiter.obc->put_lock_type(RWState::RWEXCL);
       ceph_assert_always(recovery_waiter.obc->get_recovery_read());
       return seastar::make_ready_future<>();
     })
