@@ -37,12 +37,12 @@ function TEST_recovery_scrub() {
     local poolname=test
 
     TESTDATA="testdata.$$"
-    OSDS=8
-    PGS=32
-    OBJECTS=4
+    OSDS=4
+    PGS=1
+    OBJECTS=100
 
     setup $dir || return 1
-    run_mon $dir a --osd_pool_default_size=1 || return 1
+    run_mon $dir a --osd_pool_default_size=1 --osd_scrub_during_recovery=true --osd_scrub_interval_randomize_ratio=0.0 || return 1
     run_mgr $dir x || return 1
     for osd in $(seq 0 $(expr $OSDS - 1))
     do
@@ -63,15 +63,30 @@ function TEST_recovery_scrub() {
 
     ceph osd pool set $poolname size 4
 
-    pids=""
-    for pg in $(seq 0 $(expr $PGS - 1))
+    # Wait for recovery to start
+    set -o pipefail
+    count=0
+    while(true)
     do
-        run_in_background pids pg_scrub $poolid.$(printf "%x" $pg)
+      if ceph --format json pg dump pgs |
+        jq '.pg_stats | [.[] | .state | contains("recovering")]' | grep -q true
+      then
+        break
+      fi
+      sleep 2
+      if test "$count" -eq "10"
+      then
+        echo "Recovery never started"
+        return 1
+      fi
+      count=$(expr $count + 1)
     done
+    set +o pipefail
     ceph pg dump pgs
-    wait_background pids
-    return_code=$?
-    if [ $return_code -ne 0 ]; then return $return_code; fi
+
+    # Actual scrubbing is really only needed if testing without the initial
+    # sched_scrub() check to test races with reservations.
+    TIMEOUT=5 pg_scrub $poolid.0
 
     ERRORS=0
     pidfile=$(find $dir 2>/dev/null | grep $name_prefix'[^/]*\.pid')
@@ -88,9 +103,11 @@ function TEST_recovery_scrub() {
 
     declare -a err_strings
     err_strings[0]="not scheduling scrubs due to active recovery"
+    ALL=true
     # Test with these two strings after disabled check in OSD::sched_scrub()
     #err_strings[0]="handle_scrub_reserve_request: failed to reserve remotely"
     #err_strings[1]="sched_scrub: failed to reserve locally"
+    #ALL=false
 
     for osd in $(seq 0 $(expr $OSDS - 1))
     do
@@ -99,17 +116,20 @@ function TEST_recovery_scrub() {
     for err_string in "${err_strings[@]}"
     do
         found=false
+	count=0
         for osd in $(seq 0 $(expr $OSDS - 1))
         do
-            if grep "$err_string" $dir/osd.${osd}.log > /dev/null;
+            if grep -q "$err_string" $dir/osd.${osd}.log
             then
                 found=true
+		count=$(expr $count + 1)
             fi
         done
         if [ "$found" = "false" ]; then
             echo "Missing log message '$err_string'"
-	    ERRORS=$(expr $ERRORS + 1)
+            ERRORS=$(expr $ERRORS + 1)
         fi
+        [ $ALL = "false" -o $ALL = "true" -a $count -eq $OSDS ] || return 1
     done
 
     teardown $dir || return 1
