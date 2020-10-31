@@ -137,6 +137,12 @@ protected:
     seastar::future<> wait_for_recovered() {
       return recovered.get_shared_future();
     }
+    template <typename InterruptCond>
+    crimson::osd::blocking_interruptible_future<InterruptCond>
+    wait_for_recovered_blocking() {
+      return make_blocking_interruptible_future<InterruptCond>(
+	  recovered.get_shared_future());
+    }
     seastar::future<> wait_for_pull() {
       return pulled.get_shared_future();
     }

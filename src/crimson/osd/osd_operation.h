@@ -168,6 +168,15 @@ public:
       this, std::move(f));
   }
 
+  template <typename InterruptCond, typename... T>
+  blocking_interruptible_future<InterruptCond, T...>
+  make_blocking_interruptible_future(seastar::future<T...> &&f) {
+    return blocking_interruptible_future<InterruptCond, T...>(
+	this,
+	::crimson::interruptible::interruptor<InterruptCond>::make_interruptible(
+	  std::move(f)));
+  }
+
   void dump(ceph::Formatter *f) const;
   virtual ~Blocker() = default;
 

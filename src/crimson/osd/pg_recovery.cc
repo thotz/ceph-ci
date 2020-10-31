@@ -220,6 +220,10 @@ size_t PGRecovery::start_replica_recovery_ops(
 
       if (pg->get_recovery_backend()->is_recovering(soid)) {
 	logger().debug("{}: already recovering object {}", __func__, soid);
+	auto& recovery_waiter = pg->get_recovery_backend()->get_recovering(soid);
+	out->push_back(recovery_waiter.wait_for_recovered_blocking<
+	    ::crimson::osd::IOInterruptCondition>());
+	started++;
 	continue;
       }
 
