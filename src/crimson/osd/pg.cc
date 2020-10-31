@@ -818,7 +818,7 @@ PG::get_or_load_head_obc(hobject_t oid)
 
   ceph_assert(oid.is_head());
   auto [obc, existed] = shard_services.obc_registry.get_cached_obc(oid);
-  if (existed && obc->obs.exists) {
+  if (existed) {
     logger().debug(
       "{}: found {} in cache",
       __func__,
@@ -834,7 +834,7 @@ PG::get_or_load_head_obc(hobject_t oid)
       oid);
     bool got = obc->maybe_get_excl();
     ceph_assert(got);
-    return load_head_obc(obc).safe_then_interruptible([](auto obc) {
+    return load_head_obc(obc).safe_then_interruptible<false>([](auto obc) {
       return load_obc_ertr::make_ready_future<
         std::pair<crimson::osd::ObjectContextRef, bool>>(
           std::make_pair(std::move(obc), false)
@@ -849,7 +849,7 @@ PG::interruptible_load_obc_ertr::future<crimson::osd::ObjectContextRef>
 PG::load_head_obc(ObjectContextRef obc)
 {
   hobject_t oid = obc->get_oid();
-  return backend->load_metadata(oid).safe_then_interruptible(
+  return backend->load_metadata(oid).safe_then_interruptible<false>(
     [obc=std::move(obc)](auto md)
     -> load_obc_ertr::future<crimson::osd::ObjectContextRef> {
     const hobject_t& oid = md->os.oi.soid;

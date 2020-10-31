@@ -73,7 +73,7 @@ PGBackend::load_metadata(const hobject_t& oid)
 
   return interruptor::make_interruptible(store->get_attrs(
     coll,
-    ghobject_t{oid, ghobject_t::NO_GEN, shard})).safe_then_interruptible(
+    ghobject_t{oid, ghobject_t::NO_GEN, shard})).safe_then_interruptible<false>(
       [oid](auto &&attrs) -> load_metadata_ertr::future<loaded_object_md_t::ref>{
 	loaded_object_md_t::ref ret(new loaded_object_md_t());
 	if (auto oiiter = attrs.find(OI_ATTR); oiiter != attrs.end()) {

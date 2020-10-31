@@ -484,52 +484,65 @@ public:
     interruptible_future_detail<InterruptCond, seastar::future<T...>>&& fut)
     : core_type(static_cast<seastar::future<T...>&&>(fut)) {}
 
-  template<typename ValueInterruptCondT, typename ErrorVisitorT>
+  template<bool may_interrupt = true,
+	   typename ValueInterruptCondT,
+	   typename ErrorVisitorT>
   [[gnu::always_inline]]
   auto safe_then_interruptible(ValueInterruptCondT&& valfunc, ErrorVisitorT&& errfunc) {
     assert(interrupt_cond<InterruptCond>);
-    auto fut = core_type::safe_then(
-      [func=std::move(valfunc), interrupt_condition=interrupt_cond<InterruptCond>]
-      (T... args) mutable {
-      return call_with_interruption(
-		interrupt_condition,
-		std::move(func),
-		std::forward<T>(args)...);
-      }, [func=std::move(errfunc),
-	  interrupt_condition=interrupt_cond<InterruptCond>]
-	  (auto&& err) mutable -> decltype(auto) {
-	  constexpr bool return_err = ::crimson::is_error_v<
-	    std::decay_t<std::invoke_result_t<ErrorVisitorT,
-	      std::decay_t<decltype(err)>>>>;
-	  if constexpr (return_err) {
-	    return call_with_interruption_ret_err(
-		      interrupt_condition,
-		      std::move(func),
-		      std::move(err));
-	  } else {
-	    return call_with_interruption(
-		      interrupt_condition,
-		      std::move(func),
-		      std::move(err));
-	  }
-      });
-    return (interrupt_futurize_t<decltype(fut)>)(std::move(fut));
+    if constexpr(may_interrupt) {
+      auto fut = core_type::safe_then(
+	[func=std::move(valfunc), interrupt_condition=interrupt_cond<InterruptCond>]
+	(T... args) mutable {
+	return call_with_interruption(
+		  interrupt_condition,
+		  std::move(func),
+		  std::forward<T>(args)...);
+	}, [func=std::move(errfunc),
+	    interrupt_condition=interrupt_cond<InterruptCond>]
+	    (auto&& err) mutable -> decltype(auto) {
+	    constexpr bool return_err = ::crimson::is_error_v<
+	      std::decay_t<std::invoke_result_t<ErrorVisitorT,
+		std::decay_t<decltype(err)>>>>;
+	    if constexpr (return_err) {
+	      return call_with_interruption_ret_err(
+			interrupt_condition,
+			std::move(func),
+			std::move(err));
+	    } else {
+	      return call_with_interruption(
+			interrupt_condition,
+			std::move(func),
+			std::move(err));
+	    }
+	});
+      return (interrupt_futurize_t<decltype(fut)>)(std::move(fut));
+    } else {
+      auto fut = core_type::safe_then(std::forward<ValueInterruptCondT>(valfunc),
+				      std::forward<ErrorVisitorT>(errfunc));
+      return (interrupt_futurize_t<decltype(fut)>)(std::move(fut));
+    }
   }
 
-  template <typename ValueInterruptCondT>
+  template <bool may_interrupt = true, typename ValueInterruptCondT>
   [[gnu::always_inline]]
   auto safe_then_interruptible(ValueInterruptCondT&& valfunc) {
     assert(interrupt_cond<InterruptCond>);
-    auto fut = core_type::safe_then(
-      [func=std::move(valfunc),
-       interrupt_condition=interrupt_cond<InterruptCond>]
-      (T... args) mutable {
-      return call_with_interruption(
-		interrupt_condition,
-		std::move(func),
-		std::forward<T>(args)...);
-    });
-    return (interrupt_futurize_t<decltype(fut)>)(std::move(fut));
+    if constexpr (may_interrupt) {
+      auto fut = core_type::safe_then(
+	[func=std::move(valfunc),
+	 interrupt_condition=interrupt_cond<InterruptCond>]
+	(T... args) mutable {
+	return call_with_interruption(
+		  interrupt_condition,
+		  std::move(func),
+		  std::forward<T>(args)...);
+      });
+      return (interrupt_futurize_t<decltype(fut)>)(std::move(fut));
+    } else {
+      auto fut = core_type::safe_then(std::forward<ValueInterruptCondT>(valfunc));
+      return (interrupt_futurize_t<decltype(fut)>)(std::move(fut));
+    }
   }
 
   template <typename ErrorFunc>
