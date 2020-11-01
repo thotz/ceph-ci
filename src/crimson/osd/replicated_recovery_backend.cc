@@ -423,12 +423,12 @@ ReplicatedRecoveryBackend::build_push_op(
 	  .then_interruptible([this, &recovery_info, pop](auto bl) {
 	  pop->omap_header.claim_append(bl);
 	  return store->get_attrs(coll, ghobject_t(recovery_info.soid));
-	}).safe_then_interruptible([&oi, pop, &new_progress, &v](auto attrs) mutable {
+	}).safe_then_interruptible([&oi, pop, &new_progress, &recovery_info, &v](auto attrs) mutable {
 	  //pop->attrset = attrs;
 	  for (auto p : attrs) {
 	    pop->attrset[p.first].push_back(p.second);
 	  }
-	  logger().debug("build_push_op: {}", pop->attrset[OI_ATTR]);
+	  logger().debug("build_push_op for {}: {}", recovery_info.soid, pop->attrset[OI_ATTR]);
 	  oi.decode(pop->attrset[OI_ATTR]);
 	  new_progress.first = false;
 	  if (v == eversion_t()) {
@@ -479,8 +479,8 @@ ReplicatedRecoveryBackend::build_push_op(
       }
       return seastar::make_ready_future<>();
     }).then_interruptible([this, &recovery_info, &progress, &available, pop] {
-      logger().debug("build_push_op: available: {}, copy_subset: {}",
-		     available, recovery_info.copy_subset);
+      logger().debug("build_push_op for {}: available: {}, copy_subset: {}",
+		     recovery_info.soid, available, recovery_info.copy_subset);
       return read_object_for_push_op(recovery_info.soid,
 				     recovery_info.copy_subset,
 				     progress.data_recovered_to,
@@ -506,8 +506,8 @@ ReplicatedRecoveryBackend::build_push_op(
       pop->recovery_info = recovery_info;
       pop->after_progress = new_progress;
       pop->before_progress = progress;
-      logger().debug("build_push_op: pop version: {}, pop data length: {}",
-		     pop->version, pop->data.length());
+      logger().debug("build_push_op for {}: pop version: {}, pop data length: {}",
+		     recovery_info.soid, pop->version, pop->data.length());
       return seastar::make_ready_future<ObjectRecoveryProgress>
 		(std::move(new_progress));
     });

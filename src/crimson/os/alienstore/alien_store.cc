@@ -243,7 +243,7 @@ AlienStore::readv(CollectionRef ch,
 		  interval_set<uint64_t>& m,
 		  uint32_t op_flags)
 {
-  logger().debug("{}", __func__);
+  logger().debug("{}: {}, interval_set: {}", __func__, oid, m);
   return seastar::do_with(ceph::bufferlist{},
     [this, ch, oid, &m, op_flags](auto& bl) {
     return tp->submit([this, ch, oid, &m, op_flags, &bl] {
@@ -289,7 +289,7 @@ AlienStore::get_attrs_ertr::future<AlienStore::attrs_t>
 AlienStore::get_attrs(CollectionRef ch,
                       const ghobject_t& oid)
 {
-  logger().debug("{}", __func__);
+  logger().debug("{}: {}", __func__, oid);
   return seastar::do_with(attrs_t{}, [=] (auto &aset) {
     return tp->submit([=, &aset] {
       auto c = static_cast<AlienCollection*>(ch.get());
@@ -458,6 +458,7 @@ seastar::future<ceph::bufferlist> AlienStore::omap_get_header(
   CollectionRef ch,
   const ghobject_t& oid)
 {
+  logger().debug("{}: {}", __func__, oid);
   return seastar::do_with(ceph::bufferlist(), [=](auto& bl) {
     return tp->submit([=, &bl] {
       auto c = static_cast<AlienCollection*>(ch.get());
@@ -474,6 +475,7 @@ seastar::future<std::map<uint64_t, uint64_t>> AlienStore::fiemap(
   uint64_t off,
   uint64_t len)
 {
+  logger().debug("{}: {}, off: {}, len: {}", __func__, oid, off, len);
   return seastar::do_with(std::map<uint64_t, uint64_t>(), [=](auto& destmap) {
     return tp->submit([=, &destmap] {
       auto c = static_cast<AlienCollection*>(ch.get());
