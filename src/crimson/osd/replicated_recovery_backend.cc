@@ -417,8 +417,8 @@ ReplicatedRecoveryBackend::build_push_op(
     (auto& new_progress, auto& oi, auto& available, auto& v) {
     return [this, &recovery_info, &progress, &new_progress, &oi, pop, &v]()
       -> interruptible_future<> {
+      v = recovery_info.version;
       if (progress.first) {
-	v = recovery_info.version;
 	return backend->omap_get_header(coll, ghobject_t(recovery_info.soid))
 	  .then_interruptible([this, &recovery_info, pop](auto bl) {
 	  pop->omap_header.claim_append(bl);
