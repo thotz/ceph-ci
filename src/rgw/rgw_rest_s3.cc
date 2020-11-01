@@ -1858,7 +1858,7 @@ void RGWListBucket_ObjStore_S3v2::send_response()
   if (is_truncated && !next_marker.empty()) {
     s->formatter->dump_string("NextContinuationToken", next_marker.name);
   }
-  s->formatter->dump_int("KeyCount",objs.size());
+  s->formatter->dump_int("KeyCount", objs.size() + common_prefixes.size());
   if (start_after_exist) {
     s->formatter->dump_string("StartAfter", startAfter);
   }
@@ -5888,7 +5888,7 @@ rgw::auth::s3::STSEngine::authenticate(
                                             get_creds_info(token));
     return result_t::grant(std::move(apl), completer_factory(boost::none));
   } else if (token.acct_type == TYPE_ROLE) {
-    auto apl = role_apl_factory->create_apl_role(cct, s, r, user_id, token.policy, token.role_session, token.token_claims);
+    auto apl = role_apl_factory->create_apl_role(cct, s, r, user_id, token.policy, token.role_session, token.token_claims, token.issued_at);
     return result_t::grant(std::move(apl), completer_factory(token.secret_access_key));
   } else { // This is for all local users of type TYPE_RGW or TYPE_NONE
     string subuser;

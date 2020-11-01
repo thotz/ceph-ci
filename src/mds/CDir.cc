@@ -1888,7 +1888,7 @@ CDentry *CDir::_load_dentry(
         if (in->get_inode()->is_dirty_rstat())
           in->mark_dirty_rstat();
 
-        in->maybe_ephemeral_rand(true, rand_threshold);
+        in->maybe_ephemeral_rand(rand_threshold);
         //in->hack_accessed = false;
         //in->hack_load_stamp = ceph_clock_now();
         //num_new_inodes_loaded++;
@@ -1983,13 +1983,10 @@ void CDir::_omap_fetched(bufferlist& hdrbl, map<string, bufferlist>& omap,
   list<CInode*> undef_inodes;
 
   // purge stale snaps?
-  // only if we have past_parents open!
   bool force_dirty = false;
   const set<snapid_t> *snaps = NULL;
   SnapRealm *realm = inode->find_snaprealm();
-  if (!realm->have_past_parents_open()) {
-    dout(10) << " no snap purge, one or more past parents NOT open" << dendl;
-  } else if (fnode->snap_purged_thru < realm->get_last_destroyed()) {
+  if (fnode->snap_purged_thru < realm->get_last_destroyed()) {
     snaps = &realm->get_snaps();
     dout(10) << " snap_purged_thru " << fnode->snap_purged_thru
 	     << " < " << realm->get_last_destroyed()
@@ -2344,9 +2341,7 @@ void CDir::_omap_commit(int op_prio)
   // snap purge?
   const set<snapid_t> *snaps = NULL;
   SnapRealm *realm = inode->find_snaprealm();
-  if (!realm->have_past_parents_open()) {
-    dout(10) << " no snap purge, one or more past parents NOT open" << dendl;
-  } else if (fnode->snap_purged_thru < realm->get_last_destroyed()) {
+  if (fnode->snap_purged_thru < realm->get_last_destroyed()) {
     snaps = &realm->get_snaps();
     dout(10) << " snap_purged_thru " << fnode->snap_purged_thru
 	     << " < " << realm->get_last_destroyed()
@@ -2356,7 +2351,7 @@ void CDir::_omap_commit(int op_prio)
 
   size_t count = 0;
   if (state_test(CDir::STATE_FRAGMENTING) && is_new()) {
-    count = get_num_head_items() && get_num_snap_items();
+    count = get_num_head_items() + get_num_snap_items();
   } else {
     for (elist<CDentry*>::iterator it = dirty_dentries.begin(); !it.end(); ++it)
       ++count;
@@ -2452,7 +2447,7 @@ void CDir::_parse_dentry(CDentry *dn, dentry_commit_item &item,
       if (!in->snaprealm) {
 	if (snaps)
 	  in->purge_stale_snap_data(*snaps);
-      } else if (in->snaprealm->have_past_parents_open()) {
+      } else {
 	in->purge_stale_snap_data(in->snaprealm->get_snaps());
       }
     }
@@ -2639,6 +2634,26 @@ void CDir::_committed(int r, version_t v)
 
 
 // IMPORT/EXPORT
+
+mds_rank_t CDir::get_export_pin(bool inherit) const
+{
+  mds_rank_t export_pin = inode->get_export_pin(inherit);
+  if (export_pin == MDS_RANK_EPHEMERAL_DIST)
+    export_pin = mdcache->hash_into_rank_bucket(ino(), get_frag());
+  else if (export_pin == MDS_RANK_EPHEMERAL_RAND)
+    export_pin = mdcache->hash_into_rank_bucket(ino());
+  return export_pin;
+}
+
+bool CDir::is_exportable(mds_rank_t dest) const
+{
+  mds_rank_t export_pin = get_export_pin();
+  if (export_pin == dest)
+    return true;
+  if (export_pin >= 0)
+    return false;
+  return true;
+}
 
 void CDir::encode_export(bufferlist& bl)
 {
@@ -3704,6 +3719,20 @@ bool CDir::should_split_fast() const
   }
 
   return effective_size > fast_limit;
+}
+
+bool CDir::should_merge() const
+{
+  if (get_frag() == frag_t())
+    return false;
+
+  if (inode->is_ephemeral_dist()) {
+    unsigned min_frag_bits = mdcache->get_ephemeral_dist_frag_bits();
+    if (min_frag_bits > 0 && get_frag().bits() < min_frag_bits + 1)
+      return false;
+  }
+
+  return (int)get_frag_size() < g_conf()->mds_bal_merge_size;
 }
 
 MEMPOOL_DEFINE_OBJECT_FACTORY(CDir, co_dir, mds_co);

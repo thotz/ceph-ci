@@ -325,12 +325,11 @@ class Batch(object):
             setattr(self, '{}usable'.format(dev_list), [])
 
     def report(self, plan):
-        if self.args.format == 'json':
-            print(json.dumps([osd.report_json() for osd in plan]))
-        elif self.args.format == 'json-pretty':
-            print(json.dumps([osd.report_json() for osd in plan], indent=4,
-                       sort_keys=True))
-        else:
+        report = self._create_report(plan)
+        print(report)
+
+    def _create_report(self, plan):
+        if self.args.format == 'pretty':
             report = ''
             report += templates.total_osds.format(total_osds=len(plan))
 
@@ -338,8 +337,16 @@ class Batch(object):
             for osd in plan:
                 report += templates.osd_header
                 report += osd.report()
-
-            print(report)
+            return report
+        else:
+            json_report = []
+            for osd in plan:
+                json_report.append(osd.report_json())
+            if self.args.format == 'json':
+                return json.dumps(json_report)
+            elif self.args.format == 'json-pretty':
+                return json.dumps(json_report, indent=4,
+                                  sort_keys=True)
 
     def _check_slot_args(self):
         '''
@@ -452,7 +459,7 @@ class Batch(object):
         num_osds = len(plan)
         if num_osds == 0:
             mlogger.info('All data devices are unavailable')
-            exit(0)
+            return plan
         requested_osds = args.osds_per_device * len(phys_devs) + len(lvm_devs)
 
         fast_type = 'block_db' if args.bluestore else 'journal'
@@ -462,7 +469,7 @@ class Batch(object):
                                                  fast_type)
         if fast_devices and not fast_allocations:
             mlogger.info('{} fast devices were passed, but none are available'.format(len(fast_devices)))
-            exit(0)
+            return []
         if fast_devices and not len(fast_allocations) == num_osds:
             mlogger.error('{} fast allocations != {} num_osds'.format(
                 len(fast_allocations), num_osds))
@@ -474,7 +481,7 @@ class Batch(object):
                                                       'block_wal')
         if very_fast_devices and not very_fast_allocations:
             mlogger.info('{} very fast devices were passed, but none are available'.format(len(very_fast_devices)))
-            exit(0)
+            return []
         if very_fast_devices and not len(very_fast_allocations) == num_osds:
             mlogger.error('{} very fast allocations != {} num_osds'.format(
                 len(very_fast_allocations), num_osds))

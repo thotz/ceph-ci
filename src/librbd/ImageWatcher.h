@@ -173,7 +173,7 @@ private:
   ceph::shared_mutex m_async_request_lock;
   std::map<watch_notify::AsyncRequestId, AsyncRequest> m_async_requests;
   std::set<watch_notify::AsyncRequestId> m_async_pending;
-  std::set<watch_notify::AsyncRequestId> m_async_complete;
+  std::map<watch_notify::AsyncRequestId, int> m_async_complete;
   std::set<std::pair<utime_t,
                      watch_notify::AsyncRequestId>> m_async_complete_expiration;
 
@@ -196,8 +196,11 @@ private:
   void notify_lock_owner(watch_notify::Payload *payload, Context *on_finish);
 
   bool is_new_request(const watch_notify::AsyncRequestId &id) const;
-  bool mark_async_request_complete(const watch_notify::AsyncRequestId &id);
+  bool mark_async_request_complete(const watch_notify::AsyncRequestId &id,
+                                   int r);
   Context *remove_async_request(const watch_notify::AsyncRequestId &id);
+  Context *remove_async_request(const watch_notify::AsyncRequestId &id,
+                                ceph::shared_mutex &lock);
   void schedule_async_request_timed_out(const watch_notify::AsyncRequestId &id);
   void async_request_timed_out(const watch_notify::AsyncRequestId &id);
   void notify_async_request(const watch_notify::AsyncRequestId &id,
@@ -220,7 +223,8 @@ private:
 
   Context *prepare_quiesce_request(const watch_notify::AsyncRequestId &request,
                                    C_NotifyAck *ack_ctx);
-  Context *prepare_unquiesce_request(const watch_notify::AsyncRequestId &request);
+  void prepare_unquiesce_request(const watch_notify::AsyncRequestId &request);
+  void cancel_quiesce_requests();
 
   void notify_quiesce(const watch_notify::AsyncRequestId &async_request_id,
                       size_t attempts, ProgressContext &prog_ctx,

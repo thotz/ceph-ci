@@ -189,10 +189,6 @@ If you want to avoid this behavior (disable automatic creation of OSD on availab
 
     ceph orch apply osd --all-available-devices --unmanaged=true
 
-If you have already created the OSDs using the ``all-available-devices`` service, you can change the automatic OSD creation using the following command::
-
-    ceph orch osd spec --service-name osd.all-available-devices --unmanaged
-
 Remove an OSD
 -------------
 ::
@@ -385,6 +381,9 @@ where ``name`` is the name of the CephFS and ``placement`` is a
 
 This command will create the required Ceph pools, create the new
 CephFS, and deploy mds servers.
+
+
+.. _orchestrator-cli-stateless-services:
 
 Stateless services (MDS/RGW/NFS/rbd-mirror/iSCSI)
 =================================================

@@ -24,6 +24,7 @@
 #include "ScrubStore.h"
 #include "Session.h"
 #include "objclass/objclass.h"
+#include "osd/ClassHandler.h"
 
 #include "cls/cas/cls_cas_ops.h"
 #include "common/ceph_crypto.h"
@@ -1595,13 +1596,11 @@ int PrimaryLogPG::do_scrub_ls(const MOSDOp *m, OSDOp *osd_op)
   } else if (!scrubber.store) {
     r = -ENOENT;
   } else if (arg.get_snapsets) {
-    result.vals = scrubber.store->get_snap_errors(osd->store,
-						  get_pgid().pool(),
+    result.vals = scrubber.store->get_snap_errors(get_pgid().pool(),
 						  arg.start_after,
 						  arg.max_return);
   } else {
-    result.vals = scrubber.store->get_object_errors(osd->store,
-						    get_pgid().pool(),
+    result.vals = scrubber.store->get_object_errors(get_pgid().pool(),
 						    arg.start_after,
 						    arg.max_return);
   }
@@ -2375,7 +2374,8 @@ PrimaryLogPG::cache_result_t PrimaryLogPG::maybe_handle_manifest_detail(
 	op.op == CEPH_OSD_OP_SET_CHUNK || 
 	op.op == CEPH_OSD_OP_UNSET_MANIFEST ||
 	op.op == CEPH_OSD_OP_TIER_PROMOTE ||
-	op.op == CEPH_OSD_OP_TIER_FLUSH) {
+	op.op == CEPH_OSD_OP_TIER_FLUSH ||
+	op.op == CEPH_OSD_OP_TIER_EVICT) {
       return cache_result_t::NOOP;
     } 
   }
@@ -5655,6 +5655,7 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
     case CEPH_OSD_OP_SET_CHUNK:
     case CEPH_OSD_OP_TIER_PROMOTE:
     case CEPH_OSD_OP_TIER_FLUSH:
+    case CEPH_OSD_OP_TIER_EVICT:
       break;
     default:
       if (op.op & CEPH_OSD_OP_MODE_WR)
@@ -7034,6 +7035,48 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
 	} else {
 	  result = 0;
 	}
+      }
+
+      break;
+
+    case CEPH_OSD_OP_TIER_EVICT:
+      ++ctx->num_write;
+      result = 0;
+      {
+	if (pool.info.is_tier()) {
+	  result = -EINVAL;
+	  break;
+	}
+	if (!obs.exists) {
+	  result = -ENOENT;
+	  break;
+	}
+	if (get_osdmap()->require_osd_release < ceph_release_t::octopus) {
+	  result = -EOPNOTSUPP;
+	  break;
+	}
+	if (!obs.oi.has_manifest()) {
+	  result = -EINVAL;
+	  break;
+	}
+	
+	// The chunks already has a reference, so it is just enough to invoke truncate if necessary
+	uint64_t chunk_length = 0;
+	for (auto p : obs.oi.manifest.chunk_map) {
+	  chunk_length += p.second.length;
+	}
+	if (chunk_length == obs.oi.size) {
+	  // truncate
+	  for (auto p : obs.oi.manifest.chunk_map) {
+	    p.second.set_flag(chunk_info_t::FLAG_MISSING);
+	  }
+	  t->truncate(obs.oi.soid, 0);
+	  ctx->delta_stats.num_bytes -= obs.oi.size;
+	  ctx->delta_stats.num_wr++;
+	  oi.size = 0;
+	  ctx->cache_operation = true;
+	}
+	osd->logger->inc(l_osd_tier_evict);
       }
 
       break;

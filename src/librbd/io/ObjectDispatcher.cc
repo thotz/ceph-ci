@@ -109,8 +109,7 @@ struct ObjectDispatcher<I>::SendVisitor : public boost::static_visitor<bool> {
     return object_dispatch->read(
       read.object_no, read.extents, object_dispatch_spec->io_context,
       object_dispatch_spec->op_flags, read.read_flags,
-      object_dispatch_spec->parent_trace,
-      read.read_data, read.extent_map, read.version,
+      object_dispatch_spec->parent_trace, read.version,
       &object_dispatch_spec->object_dispatch_flags,
       &object_dispatch_spec->dispatch_result,
       &object_dispatch_spec->dispatcher_ctx.on_finish,
@@ -231,6 +230,21 @@ void ObjectDispatcher<I>::extent_overwritten(
     auto object_dispatch = object_dispatch_meta.dispatch;
     object_dispatch->extent_overwritten(object_no, object_off, object_len,
                                         journal_tid, new_journal_tid);
+  }
+}
+
+template <typename I>
+void ObjectDispatcher<I>::prepare_copyup(
+    uint64_t object_no,
+    SnapshotSparseBufferlist* snapshot_sparse_bufferlist) {
+  auto cct = this->m_image_ctx->cct;
+  ldout(cct, 20) << "object_no=" << object_no << dendl;
+
+  std::shared_lock locker{this->m_lock};
+  for (auto it : this->m_dispatches) {
+    auto& object_dispatch_meta = it.second;
+    auto object_dispatch = object_dispatch_meta.dispatch;
+    object_dispatch->prepare_copyup(object_no, snapshot_sparse_bufferlist);
   }
 }
 

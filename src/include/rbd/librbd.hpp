@@ -528,6 +528,8 @@ public:
       CEPH_RBD_DEPRECATED;
   int get_parent(linked_image_spec_t *parent_image, snap_spec_t *parent_snap);
 
+  int get_migration_source_spec(std::string* source_spec);
+
   int old_format(uint8_t *old);
   int size(uint64_t *size);
   int get_group(group_info_t *group_info, size_t group_info_size);
@@ -784,6 +786,8 @@ public:
       mirror_image_status_t *mirror_image_status, size_t status_size,
       RBD::AioCompletion *c)
     CEPH_RBD_DEPRECATED;
+  int aio_mirror_image_create_snapshot(uint32_t flags, uint64_t *snap_id,
+      RBD::AioCompletion *c);
 
   int update_watch(UpdateWatchCtx *ctx, uint64_t *handle);
   int update_unwatch(uint64_t handle);

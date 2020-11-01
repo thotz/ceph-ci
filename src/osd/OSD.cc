@@ -145,6 +145,7 @@
 #include "perfglue/cpu_profiler.h"
 #include "perfglue/heap_profiler.h"
 
+#include "osd/ClassHandler.h"
 #include "osd/OpRequest.h"
 
 #include "auth/AuthAuthorizeHandler.h"
@@ -276,7 +277,7 @@ OSDService::OSDService(OSD *osd, ceph::async::io_context_pool& poolctx) :
   poolctx(poolctx),
   objecter(make_unique<Objecter>(osd->client_messenger->cct,
 				 osd->objecter_messenger,
-				 osd->monc, poolctx, 0, 0)),
+				 osd->monc, poolctx)),
   m_objecter_finishers(cct->_conf->osd_objecter_finishers),
   watch_timer(osd->client_messenger->cct, watch_lock),
   next_notif_id(0),
@@ -6748,7 +6749,8 @@ void OSD::send_beacon(const ceph::coarse_mono_clock::time_point& now)
       std::lock_guard l{min_last_epoch_clean_lock};
       beacon = new MOSDBeacon(get_osdmap_epoch(),
 			      min_last_epoch_clean,
-			      superblock.last_purged_snaps_scrub);
+			      superblock.last_purged_snaps_scrub,
+			      cct->_conf->osd_beacon_report_interval);
       beacon->pgs = min_last_epoch_clean_pgs;
       last_sent_beacon = now;
     }
@@ -10487,21 +10489,54 @@ void OSD::ShardedOpWQ::_process(uint32_t thread_index, heartbeat_handle_d *hb)
     sdata->context_queue.move_to(oncommits);
   }
 
-  if (sdata->scheduler->empty()) {
+  WorkItem work_item;
+  while (!std::get_if<OpSchedulerItem>(&work_item)) {
+    if (sdata->scheduler->empty()) {
+      if (osd->is_stopping()) {
+        sdata->shard_lock.unlock();
+        for (auto c : oncommits) {
+          dout(10) << __func__ << " discarding in-flight oncommit " << c << dendl;
+          delete c;
+        }
+        return;    // OSD shutdown, discard.
+      }
+      sdata->shard_lock.unlock();
+      handle_oncommits(oncommits);
+      return;
+    }
+
+    work_item = sdata->scheduler->dequeue();
     if (osd->is_stopping()) {
       sdata->shard_lock.unlock();
       for (auto c : oncommits) {
-	dout(10) << __func__ << " discarding in-flight oncommit " << c << dendl;
-	delete c;
+        dout(10) << __func__ << " discarding in-flight oncommit " << c << dendl;
+        delete c;
       }
       return;    // OSD shutdown, discard.
     }
-    sdata->shard_lock.unlock();
-    handle_oncommits(oncommits);
-    return;
-  }
 
-  OpSchedulerItem item = sdata->scheduler->dequeue();
+    // If the work item is scheduled in the future, wait until
+    // the time returned in the dequeue response before retrying.
+    if (auto when_ready = std::get_if<double>(&work_item)) {
+      if (is_smallest_thread_index) {
+        sdata->shard_lock.unlock();
+        handle_oncommits(oncommits);
+        return;
+      }
+      std::unique_lock wait_lock{sdata->sdata_wait_lock};
+      auto future_time = ceph::real_clock::from_double(*when_ready);
+      dout(10) << __func__ << " dequeue future request at " << future_time << dendl;
+      sdata->shard_lock.unlock();
+      ++sdata->waiting_threads;
+      sdata->sdata_cond.wait_until(wait_lock, future_time);
+      --sdata->waiting_threads;
+      wait_lock.unlock();
+      sdata->shard_lock.lock();
+    }
+  } // while
+
+  // Access the stored item
+  auto item = std::move(std::get<OpSchedulerItem>(work_item));
   if (osd->is_stopping()) {
     sdata->shard_lock.unlock();
     for (auto c : oncommits) {
@@ -10750,9 +10785,13 @@ void OSD::ShardedOpWQ::_enqueue(OpSchedulerItem&& item) {
     sdata->scheduler->enqueue(std::move(item));
   }
 
-  if (empty) {
+  {
     std::lock_guard l{sdata->sdata_wait_lock};
-    sdata->sdata_cond.notify_all();
+    if (empty) {
+      sdata->sdata_cond.notify_all();
+    } else if (sdata->waiting_threads) {
+      sdata->sdata_cond.notify_one();
+    }
   }
 }
 

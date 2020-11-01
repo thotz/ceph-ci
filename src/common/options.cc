@@ -2708,7 +2708,7 @@ std::vector<Option> get_global_options() {
 
     Option("osd_erasure_code_plugins", Option::TYPE_STR, Option::LEVEL_ADVANCED)
     .set_default("jerasure lrc"
-  #if defined(HAVE_BETTER_YASM_ELF64) || defined(HAVE_ARMV8_SIMD)
+  #if defined(HAVE_NASM_X64_AVX2) || defined(HAVE_ARMV8_SIMD)
          " isa"
   #endif
         )
@@ -2950,13 +2950,10 @@ std::vector<Option> get_global_options() {
 
     Option("osd_op_queue", Option::TYPE_STR, Option::LEVEL_ADVANCED)
     .set_default("wpq")
-    .set_enum_allowed( { "wpq", "prioritized",
-	  "mclock_opclass", "mclock_client", "mclock_scheduler",
-	  "debug_random" } )
+    .set_enum_allowed( { "wpq", "mclock_scheduler", "debug_random" } )
     .set_description("which operation priority queue algorithm to use")
     .set_long_description("which operation priority queue algorithm to use; "
-			  "mclock_opclass mclock_client, and "
-			  "mclock_client_profile are currently experimental")
+			  "mclock_scheduler is currently experimental")
     .add_see_also("osd_op_queue_cut_off"),
 
     Option("osd_op_queue_cut_off", Option::TYPE_STR, Option::LEVEL_ADVANCED)
@@ -5249,13 +5246,17 @@ std::vector<Option> get_global_options() {
     .set_default("/tmp/fio")
     .set_description(""),
 
-    Option("rados_mon_op_timeout", Option::TYPE_FLOAT, Option::LEVEL_ADVANCED)
+    Option("rados_mon_op_timeout", Option::TYPE_SECS, Option::LEVEL_ADVANCED)
     .set_default(0)
-    .set_description(""),
+    .set_description("timeout for operations handled by monitors such as statfs (0 is unlimited)")
+    .set_flag(Option::FLAG_RUNTIME)
+    .set_min(0),
 
-    Option("rados_osd_op_timeout", Option::TYPE_FLOAT, Option::LEVEL_ADVANCED)
+    Option("rados_osd_op_timeout", Option::TYPE_SECS, Option::LEVEL_ADVANCED)
     .set_default(0)
-    .set_description(""),
+    .set_description("timeout for operations handled by osds such as write (0 is unlimited)")
+    .set_flag(Option::FLAG_RUNTIME)
+    .set_min(0),
 
     Option("rados_tracing", Option::TYPE_BOOL, Option::LEVEL_ADVANCED)
     .set_default(false)
@@ -7087,6 +7088,10 @@ std::vector<Option> get_rgw_options() {
     .set_description("Session token max duration")
     .set_long_description("Max duration in seconds for which the session token is valid."),
 
+    Option("rgw_sts_min_session_duration", Option::TYPE_UINT, Option::LEVEL_ADVANCED)
+    .set_default(900)
+    .set_description("Minimum allowed duration of a session"),
+
     Option("rgw_max_listing_results", Option::TYPE_UINT,
 	   Option::LEVEL_ADVANCED)
     .set_default(1000)
@@ -8107,6 +8112,12 @@ std::vector<Option> get_mds_options() {
     .set_description("allow ephemeral distributed pinning of the loaded subtrees")
     .set_long_description("pin the immediate child directories of the loaded directory inode based on the consistent hash of the child's inode number. "),
 
+    Option("mds_export_ephemeral_distributed_factor", Option::TYPE_FLOAT, Option::LEVEL_ADVANCED)
+    .set_default(2.0)
+    .set_min_max(1.0, 100.0)
+    .set_flag(Option::FLAG_RUNTIME)
+    .set_description("multiple of max_mds for splitting and distributing directory"),
+
     Option("mds_bal_sample_interval", Option::TYPE_FLOAT, Option::LEVEL_ADVANCED)
     .set_default(3.0)
     .set_description("interval in seconds between balancer ticks"),
@@ -8776,6 +8787,19 @@ std::vector<Option> get_cephfs_mirror_options() {
     .set_default("random")
     .set_description("policy for choosing directories to mirror snapshots")
     .set_long_description("policy used by cephfs-mirror daemon to choose directories for snapshot mirroring"),
+
+    Option("cephfs_mirror_mirror_action_update_interval", Option::TYPE_SECS, Option::LEVEL_ADVANCED)
+    .set_default(2)
+    .set_min(1)
+    .set_description("")
+    .set_long_description(""),
+
+    Option("cephfs_mirror_restart_mirror_on_blocklist_interval", Option::TYPE_SECS, Option::LEVEL_ADVANCED)
+    .set_default(30)
+    .set_min(0)
+    .set_description("")
+    .set_long_description(""),
+
     });
 }
 

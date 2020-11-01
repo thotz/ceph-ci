@@ -89,6 +89,8 @@ set(unittest_librbd_srcs
   managed_lock/test_mock_GetLockerRequest.cc
   managed_lock/test_mock_ReacquireRequest.cc
   managed_lock/test_mock_ReleaseRequest.cc
+  migration/test_mock_FileStream.cc
+  migration/test_mock_RawFormat.cc
   mirror/snapshot/test_mock_CreateNonPrimaryRequest.cc
   mirror/snapshot/test_mock_CreatePrimaryRequest.cc
   mirror/snapshot/test_mock_ImageMeta.cc
@@ -123,7 +125,7 @@ set(unittest_librbd_srcs
 if(WITH_RBD_RWL)
    set(unittest_librbd_srcs
      ${unittest_librbd_srcs}
-     cache/test_mock_ReplicatedWriteLog.cc
+     cache/pwl/test_mock_ReplicatedWriteLog.cc
      cache/pwl/test_WriteLogMap.cc)
 endif(WITH_RBD_RWL)
 

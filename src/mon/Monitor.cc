@@ -203,7 +203,6 @@ Monitor::Monitor(CephContext* cct_, string nm, MonitorDBStore *s,
   timecheck_rounds_since_clean(0),
   timecheck_event(NULL),
 
-  paxos_service(PAXOS_NUM),
   admin_hook(NULL),
   routed_request_tid(0),
   op_tracker(cct, g_conf().get_val<bool>("mon_enable_op_tracker"), 1)
@@ -286,7 +285,6 @@ Monitor::~Monitor()
 {
   op_tracker.on_shutdown();
 
-  paxos_service.clear();
   delete config_key_service;
   delete paxos;
   ceph_assert(session_map.sessions.empty());
@@ -3083,7 +3081,9 @@ void Monitor::get_cluster_status(stringstream &ss, Formatter *f,
     if (!pem.empty()) {
       ss << "\n \n  progress:\n";
       for (auto& i : pem) {
+	if (i.second.add_to_ceph_s){
 	ss << "    " << i.second.message << "\n";
+	}
       }
     }
     ss << "\n ";

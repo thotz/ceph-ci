@@ -99,11 +99,11 @@ struct C_AssembleSnapshotDeltas : public C_AioRequest {
         auto& intervals = (*image_snapshot_delta)[key];
         auto& assembled_intervals = (*assembled_image_snapshot_delta)[key];
         for (auto [image_offset, image_length] : image_extents) {
-          SnapshotExtent snapshot_extent{object_extent.get_val().state,
-                                         image_length};
-          intervals.insert(image_offset, image_length, snapshot_extent);
+          SparseExtent sparse_extent{object_extent.get_val().state,
+                                     image_length};
+          intervals.insert(image_offset, image_length, sparse_extent);
           assembled_intervals.insert(image_offset, image_length,
-                                     snapshot_extent);
+                                     sparse_extent);
         }
       }
     }
@@ -114,21 +114,19 @@ template <typename I>
 struct C_RBD_Readahead : public Context {
   I *ictx;
   uint64_t object_no;
-  uint64_t offset;
-  uint64_t length;
-
-  bufferlist read_data;
-  io::Extents extent_map;
+  io::ReadExtents extents;
 
   C_RBD_Readahead(I *ictx, uint64_t object_no, uint64_t offset, uint64_t length)
-    : ictx(ictx), object_no(object_no), offset(offset), length(length) {
+    : ictx(ictx), object_no(object_no), extents({{offset, length}}) {
     ictx->readahead.inc_pending();
   }
 
   void finish(int r) override {
+    ceph_assert(extents.size() == 1);
+    auto& extent = extents.front();
     ldout(ictx->cct, 20) << "C_RBD_Readahead on "
                          << data_object_name(ictx, object_no) << ": "
-                         << offset << "~" << length << dendl;
+                         << extent.offset << "~" << extent.length << dendl;
     ictx->readahead.dec_pending();
   }
 };
@@ -176,8 +174,7 @@ void readahead(I *ictx, const Extents& image_extents, IOContext io_context) {
                                              object_extent.length);
       auto req = io::ObjectDispatchSpec::create_read(
         ictx, io::OBJECT_DISPATCH_LAYER_NONE, object_extent.object_no,
-        {{object_extent.offset, object_extent.length}}, io_context, 0, 0, {},
-        &req_comp->read_data, &req_comp->extent_map, nullptr, req_comp);
+        &req_comp->extents, io_context, 0, 0, {}, nullptr, req_comp);
       req->send();
     }
 
@@ -406,7 +403,6 @@ void ImageReadRequest<I>::send_request() {
   }
 
   AioCompletion *aio_comp = this->m_aio_comp;
-  aio_comp->read_result.set_clip_length(buffer_ofs);
   aio_comp->read_result.set_image_extents(image_extents);
 
   // issue the requests
@@ -417,11 +413,11 @@ void ImageReadRequest<I>::send_request() {
                    << oe.buffer_extents << dendl;
 
     auto req_comp = new io::ReadResult::C_ObjectReadRequest(
-      aio_comp, oe.offset, oe.length, std::move(oe.buffer_extents));
+      aio_comp, {{oe.offset, oe.length, std::move(oe.buffer_extents)}});
     auto req = ObjectDispatchSpec::create_read(
       &image_ctx, OBJECT_DISPATCH_LAYER_NONE, oe.object_no,
-      {{oe.offset, oe.length}}, this->m_io_context, m_op_flags, m_read_flags,
-      this->m_trace, &req_comp->bl, &req_comp->extent_map, nullptr, req_comp);
+      &req_comp->extents, this->m_io_context, m_op_flags, m_read_flags,
+      this->m_trace, nullptr, req_comp);
     req->send();
   }
 

@@ -616,6 +616,7 @@ public:
   virtual void shutdown();
 
   // messaging
+  void cancel_commands(const MDSMap& newmap);
   void handle_mds_map(const MConstRef<MMDSMap>& m);
   void handle_fs_map(const MConstRef<MFSMap>& m);
   void handle_fs_map_user(const MConstRef<MFSMapUser>& m);
@@ -1294,6 +1295,9 @@ private:
   bool _vxattrcb_snap_btime_exists(Inode *in);
   size_t _vxattrcb_snap_btime(Inode *in, char *val, size_t size);
 
+  bool _vxattrcb_mirror_info_exists(Inode *in);
+  size_t _vxattrcb_mirror_info(Inode *in, char *val, size_t size);
+
   static const VXattr *_get_vxattrs(Inode *in);
   static const VXattr *_match_vxattr(Inode *in, const char *name);
 
@@ -1357,6 +1361,8 @@ private:
   std::unique_ptr<FSMap> fsmap;
   std::unique_ptr<FSMapUser> fsmap_user;
 
+  // This mutex only protects command_table
+  ceph::mutex command_lock = ceph::make_mutex("Client::command_lock");
   // MDS command state
   CommandTable<MDSCommandOp> command_table;
 

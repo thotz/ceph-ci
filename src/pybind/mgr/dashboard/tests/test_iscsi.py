@@ -1,4 +1,4 @@
-# pylint: disable=too-many-public-methods
+# pylint: disable=too-many-public-methods, too-many-lines
 
 import copy
 import errno
@@ -10,13 +10,16 @@ try:
 except ImportError:
     import unittest.mock as mock
 
-from . import CmdException, ControllerTestCase, CLICommandTestMixin, KVStoreMockMixin
 from .. import mgr
 from ..controllers.iscsi import Iscsi, IscsiTarget
+from ..rest_client import RequestException
 from ..services.iscsi_client import IscsiClient
 from ..services.orchestrator import OrchClient
-from ..rest_client import RequestException
 from ..tools import NotificationQueue, TaskManager
+from . import CLICommandTestMixin  # pylint: disable=no-name-in-module
+from . import CmdException  # pylint: disable=no-name-in-module
+from . import ControllerTestCase  # pylint: disable=no-name-in-module
+from . import KVStoreMockMixin  # pylint: disable=no-name-in-module
 
 
 class IscsiTestCli(unittest.TestCase, CLICommandTestMixin):
@@ -596,10 +599,12 @@ class IscsiTestController(ControllerTestCase, KVStoreMockMixin):
                              update_response, response):
         self._task_post('/api/iscsi/target', create_request)
         self.assertStatus(201)
-        self._task_put('/api/iscsi/target/{}'.format(create_request['target_iqn']), update_request)
+        self._task_put(
+            '/api/iscsi/target/{}'.format(create_request['target_iqn']), update_request)
         self.assertStatus(update_response_code)
         self.assertJsonBody(update_response)
-        self._get('/api/iscsi/target/{}'.format(update_request['new_target_iqn']))
+        self._get(
+            '/api/iscsi/target/{}'.format(update_request['new_target_iqn']))
         self.assertStatus(200)
         self.assertJsonBody(response)
 

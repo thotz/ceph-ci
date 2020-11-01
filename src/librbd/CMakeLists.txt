@@ -1,9 +1,16 @@
-add_library(rbd_types STATIC
+set(librbd_types_srcs
   journal/Types.cc
   mirroring_watcher/Types.cc
   trash_watcher/Types.cc
   watcher/Types.cc
   WatchNotifyTypes.cc)
+
+if(WITH_RBD_RWL OR WITH_RBD_SSD_CACHE)
+ list(APPEND librbd_types_srcs cache/pwl/Types.cc)
+endif()
+
+add_library(rbd_types STATIC
+  ${librbd_types_srcs})
 
 set(librbd_internal_srcs
   AsioEngine.cc
@@ -42,7 +49,6 @@ set(librbd_internal_srcs
   cache/ImageWriteback.cc
   cache/ObjectCacherObjectDispatch.cc
   cache/ObjectCacherWriteback.cc
-  cache/PassthroughImageCache.cc
   cache/pwl/InitRequest.cc
   cache/pwl/ShutdownRequest.cc
   cache/WriteAroundObjectDispatch.cc
@@ -117,6 +123,11 @@ set(librbd_internal_srcs
   managed_lock/ReacquireRequest.cc
   managed_lock/ReleaseRequest.cc
   managed_lock/Utils.cc
+  migration/FileStream.cc
+  migration/ImageDispatch.cc
+  migration/NativeFormat.cc
+  migration/OpenSourceImageRequest.cc
+  migration/RawFormat.cc
   mirror/DemoteRequest.cc
   mirror/DisableRequest.cc
   mirror/EnableRequest.cc
@@ -182,7 +193,7 @@ if(WITH_EVENTTRACE)
   list(APPEND librbd_internal_srcs ../common/EventTrace.cc)
 endif()
 
-if(WITH_RBD_RWL)
+if(WITH_RBD_RWL OR WITH_RBD_SSD_CACHE)
   set(librbd_internal_srcs
     ${librbd_internal_srcs}
     cache/pwl/ImageCacheState.cc
@@ -192,11 +203,18 @@ if(WITH_RBD_RWL)
     cache/pwl/ReadRequest.cc
     cache/pwl/Request.cc
     cache/pwl/SyncPoint.cc
-    cache/pwl/Types.cc
-    cache/pwl/ReplicatedWriteLog.cc
     cache/pwl/AbstractWriteLog.cc
-    cache/pwl/ImageDispatch.cc
-    cache/WriteLogCache.cc)
+    cache/WriteLogImageDispatch.cc)
+  if(WITH_RBD_RWL)
+    set(librbd_internal_srcs
+      ${librbd_internal_srcs}
+      cache/pwl/ReplicatedWriteLog.cc)
+  endif()
+  if(WITH_RBD_SSD_CACHE)
+    set(librbd_internal_srcs
+      ${librbd_internal_srcs}
+       cache/pwl/SSDWriteLog.cc)
+  endif()
 endif()
 
 add_library(rbd_api STATIC librbd.cc)
@@ -216,11 +234,14 @@ target_link_libraries(rbd_internal PRIVATE
   osdc rbd_types)
 target_include_directories(rbd_internal PRIVATE ${OPENSSL_INCLUDE_DIR})
 
-if(WITH_RBD_RWL)
+if(WITH_RBD_RWL OR WITH_RBD_SSD_CACHE)
   target_link_libraries(rbd_internal
     PUBLIC blk)
 endif()
-
+if(WITH_RBD_RWL)
+  target_link_libraries(rbd_types
+    PUBLIC blk)
+endif()
 add_custom_target(librbd_plugins)
 set(librbd_plugins_dir ${CEPH_INSTALL_PKGLIBDIR}/librbd)
 

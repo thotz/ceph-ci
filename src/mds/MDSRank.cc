@@ -490,7 +490,7 @@ MDSRank::MDSRank(
     boost::asio::io_context& ioc) :
     cct(msgr->cct), mds_lock(mds_lock_), clog(clog_),
     timer(timer_), mdsmap(mdsmap_),
-    objecter(new Objecter(g_ceph_context, msgr, monc_, ioc, 0, 0)),
+    objecter(new Objecter(g_ceph_context, msgr, monc_, ioc)),
     damage_table(whoami_), sessionmap(this),
     op_tracker(g_ceph_context, g_conf()->mds_enable_op_tracker,
                g_conf()->osd_num_op_tracker_shard),
@@ -700,12 +700,6 @@ void MDSRank::set_mdsmap_multimds_snaps_allowed()
   monc->start_mon_command(cmd, {}, nullptr, &fin->outs, new C_IO_Wrapper(this, fin));
 
   already_sent = true;
-}
-
-void MDSRank::mark_base_recursively_scrubbed(inodeno_t ino)
-{
-  if (mdsmap->get_tableserver() == whoami)
-    snapserver->mark_base_recursively_scrubbed(ino);
 }
 
 void MDSRankDispatcher::tick()
@@ -2080,9 +2074,6 @@ void MDSRank::recovery_done(int oldstate)
   mdcache->start_purge_inodes();
   mdcache->start_files_to_recover();
 
-  // tell connected clients
-  //bcast_mds_map();     // not anymore, they get this from the monitor
-
   mdcache->populate_mydir();
 }
 
@@ -2953,11 +2944,13 @@ void MDSRank::command_get_subtrees(Formatter *f)
     {
       f->dump_bool("is_auth", dir->is_auth());
       f->dump_int("auth_first", dir->get_dir_auth().first);
-      f->dump_int("auth_second", dir->get_dir_auth().second);
-      f->dump_int("export_pin", dir->inode->get_export_pin(false, false));
-      f->dump_bool("distributed_ephemeral_pin", dir->inode->is_ephemeral_dist());
-      f->dump_bool("random_ephemeral_pin", dir->inode->is_ephemeral_rand());
-      f->dump_int("ephemeral_pin", mdcache->hash_into_rank_bucket(dir->inode->ino()));
+      f->dump_int("auth_second", dir->get_dir_auth().second); {
+	mds_rank_t export_pin = dir->inode->get_export_pin(false);
+	f->dump_int("export_pin", export_pin >= 0 ? export_pin : -1);
+	f->dump_bool("distributed_ephemeral_pin", export_pin == MDS_RANK_EPHEMERAL_DIST);
+	f->dump_bool("random_ephemeral_pin", export_pin == MDS_RANK_EPHEMERAL_RAND);
+      }
+      f->dump_int("export_pin_target", dir->get_export_pin(false));
       f->open_object_section("dir");
       dir->dump(f);
       f->close_section();
@@ -3565,21 +3558,6 @@ bool MDSRank::evict_client(int64_t session_id,
   }
 
   return true;
-}
-
-void MDSRank::bcast_mds_map()
-{
-  dout(7) << "bcast_mds_map " << mdsmap->get_epoch() << dendl;
-
-  // share the map with mounted clients
-  set<Session*> clients;
-  sessionmap.get_client_session_set(clients);
-  for (const auto &session : clients) {
-    auto m = make_message<MMDSMap>(monc->get_fsid(), *mdsmap,
-				   std::string(mdsmap->get_fs_name()));
-    session->get_connection()->send_message2(std::move(m));
-  }
-  last_client_mdsmap_bcast = mdsmap->get_epoch();
 }
 
 MDSRankDispatcher::MDSRankDispatcher(

@@ -139,20 +139,21 @@ endif()
 
 include(SIMDExt)
 if(HAVE_INTEL)
-  set(CMAKE_ASM_COMPILER  ${PROJECT_SOURCE_DIR}/src/yasm-wrapper)
   if(APPLE)
     set(object_format "macho64")
   else()
     set(object_format "elf64")
   endif()
   set(CMAKE_ASM_FLAGS "-f ${object_format}")
+  set(CMAKE_ASM_COMPILER ${PROJECT_SOURCE_DIR}/src/nasm-wrapper)
   if(NOT WIN32)
     # The native tools might be located even when cross compiling, which
     # might not work in this case (especially when targeting Windows).
-    include(CheckYasm)
-    check_yasm_support(${object_format}
-      HAVE_GOOD_YASM_ELF64
-      HAVE_BETTER_YASM_ELF64)
+    include(CheckNasm)
+    check_nasm_support(${object_format}
+      HAVE_NASM_X64
+      HAVE_NASM_X64_AVX2
+      HAVE_NASM_X64_AVX512)
   endif()
 endif()
 
@@ -778,11 +779,9 @@ if(WITH_RBD)
   add_subdirectory(rbd_replay)
 endif(WITH_RBD)
 
-if(WITH_BOOST_CONTEXT)
-  set(SPAWN_BUILD_TESTS OFF CACHE INTERNAL "disable building of spawn unit tests")
-  set(SPAWN_INSTALL OFF CACHE INTERNAL "disable installation of spawn headers")
-  add_subdirectory(spawn)
-endif()
+set(SPAWN_BUILD_TESTS OFF CACHE INTERNAL "disable building of spawn unit tests")
+set(SPAWN_INSTALL OFF CACHE INTERNAL "disable installation of spawn headers")
+add_subdirectory(spawn)
 
 # RadosGW
 if(WITH_KVS)
@@ -893,12 +892,22 @@ if(DOXYGEN_FOUND)
   set(DOXYGEN_FILE_PATTERNS *.cc *.c *.cpp *.C *.cxx *.c++ *.CC *.H *.h *.hh *.hpp)
   set(DOXYGEN_SOURCE_BROWSER YES)
   set(DOXYGEN_WARN_IF_UNDOCUMENTED NO)
-  set(DOXYGEN_CLANG_ASSISTED_PARSING YES)
-  set(DOXYGEN_CLANG_DATABASE_PATH .)
+  # enabling clang slows down doxygen significantly
+  set(DOXYGEN_CLANG_ASSISTED_PARSING NO)
+  set(DOXYGEN_CLANG_DATABASE_PATH "${PROJECT_BINARY_DIR}")
   set(DOXYGEN_BUILTIN_STL_SUPPORT YES)
   set(DOXYGEN_RECURSIVE YES)
   set(DOXYGEN_QUIET YES)
   set(DOXYGEN_GENERATE_LATEX NO)
+  set(DOXYGEN_GENERATE_XML NO)
+  set(DOXYGEN_GENERATE_HTML YES)
+  set(DOXYGEN_PROJECT_NAME Ceph)
+  set(DOXYGEN_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/build-doc/doxygen")
+  set(DOXYGEN_STRIP_FROM_PATH "src/")
+  set(DOXYGEN_STRIP_FROM_INC_PATH "src/include")
+  set(DOXYGEN_JAVADOC_AUTOBRIEF YES)
+  set(DOXYGEN_HAVE_DOT NO)
+  set(DOXYGEN_VERBATIM_HEADERS YES)
   doxygen_add_docs(doxygen
     auth
     client
@@ -919,7 +928,6 @@ if(DOXYGEN_FOUND)
     libradosstriper
     librbd
     log
-    lua
     mds
     messages
     mgr
