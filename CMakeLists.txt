@@ -371,6 +371,7 @@ option(WITH_RADOSGW_BEAST_FRONTEND "Rados Gateway's Beast frontend is enabled" O
 option(WITH_RADOSGW_BEAST_OPENSSL "Rados Gateway's Beast frontend uses OpenSSL" ON)
 option(WITH_RADOSGW_AMQP_ENDPOINT "Rados Gateway's pubsub support for AMQP push endpoint" ON)
 option(WITH_RADOSGW_KAFKA_ENDPOINT "Rados Gateway's pubsub support for Kafka push endpoint" ON)
+option(WITH_RADOSGW_LUA_MODULES "Rados Gateway's support for dynamically adding lua modules" ON)
 
 if(WITH_RADOSGW)
   find_package(EXPAT REQUIRED)
@@ -566,7 +567,7 @@ option(WITH_SYSTEM_BOOST "require and build with system Boost" OFF)
 # Boost::thread depends on Boost::atomic, so list it explicitly.
 set(BOOST_COMPONENTS
   atomic chrono thread system regex random program_options date_time
-  iostreams context coroutine)
+  iostreams context coroutine filesystem)
 set(BOOST_HEADER_COMPONENTS container)
 
 if(WITH_MGR)
