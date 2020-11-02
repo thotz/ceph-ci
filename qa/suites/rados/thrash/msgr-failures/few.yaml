@@ -8,3 +8,4 @@ overrides:
         osd heartbeat use min delay socket: true
     log-ignorelist:
       - \(OSD_SLOW_PING_TIME
+      - \(MON_DOWN
