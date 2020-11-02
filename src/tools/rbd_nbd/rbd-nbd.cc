@@ -1473,7 +1473,7 @@ static int wait_for_terminate(int pid, int timeout)
 {
   int fd = pidfd_open(pid, 0);
   if (fd == -1) {
-    if (errno == -ESRCH) {
+    if (errno == ESRCH) {
       return 0;
     }
     if (errno == ENOSYS) {
@@ -1496,6 +1496,8 @@ static int wait_for_terminate(int pid, int timeout)
     cerr << "rbd-nbd: failed to poll rbd-nbd process: " << cpp_strerror(r)
          << std::endl;
     goto done;
+  } else {
+    r = 0;
   }
 
   if ((poll_fds[0].revents & POLLIN) == 0) {
@@ -1727,34 +1729,39 @@ static int do_detach(Config *cfg)
 
 static int do_unmap(Config *cfg)
 {
-  int r, nbd;
-
   /*
    * The netlink disconnect call supports devices setup with netlink or ioctl,
    * so we always try that first.
    */
-  r = netlink_disconnect_by_path(cfg->devpath);
-  if (r != 1)
+  int r = netlink_disconnect_by_path(cfg->devpath);
+  if (r < 0) {
     return r;
-
-  nbd = open(cfg->devpath.c_str(), O_RDWR);
-  if (nbd < 0) {
-    cerr << "rbd-nbd: failed to open device: " << cfg->devpath << std::endl;
-    return nbd;
   }
 
-  r = ioctl(nbd, NBD_DISCONNECT);
-  if (r < 0) {
+  if (r == 1) {
+    int nbd = open(cfg->devpath.c_str(), O_RDWR);
+    if (nbd < 0) {
+      cerr << "rbd-nbd: failed to open device: " << cfg->devpath << std::endl;
+      return nbd;
+    }
+
+    r = ioctl(nbd, NBD_DISCONNECT);
+    if (r < 0) {
       cerr << "rbd-nbd: the device is not used" << std::endl;
+    }
+
+    close(nbd);
+
+    if (r < 0) {
+      return r;
+    }
   }
 
-  close(nbd);
-
-  if (r < 0) {
-    return r;
+  if (cfg->pid > 0) {
+    r = wait_for_terminate(cfg->pid, cfg->reattach_timeout);
   }
 
-  return wait_for_terminate(cfg->pid, cfg->reattach_timeout);
+  return 0;
 }
 
 static int parse_imgpath(const std::string &imgpath, Config *cfg,
