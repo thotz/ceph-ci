@@ -1183,7 +1183,7 @@ void PgScrubber::scrub_compare_maps()
 {
   dout(10) << __func__ << " has maps, analyzing" << dendl;
 
-  // construct authoritative scrub map for type-specific scrubbing
+  // construct authoritative scrub map for type specific scrubbing
   m_cleaned_meta_map.insert(m_primary_scrubmap);
   map<hobject_t, pair<std::optional<uint32_t>, std::optional<uint32_t>>> missing_digest;
 
@@ -1201,7 +1201,7 @@ void PgScrubber::scrub_compare_maps()
   set<hobject_t> master_set;
 
   // Construct master set
-  for (const auto map : maps) {
+  for (const auto& map : maps) {
     for (const auto& i : map.second->objects) {
       master_set.insert(i.first);
     }
@@ -1239,21 +1239,30 @@ void PgScrubber::scrub_compare_maps()
       m_osds->clog->error(ss);
     }
 
-    for (auto& [hobj, shrd_list] : authoritative) {
+    for (map<hobject_t, list<pg_shard_t>>::iterator i = authoritative.begin();
+	 i != authoritative.end(); ++i) {
       list<pair<ScrubMap::object, pg_shard_t>> good_peers;
-      for (const auto shrd : shrd_list) {
-	good_peers.emplace_back(maps[shrd]->objects[hobj], shrd);
+      for (list<pg_shard_t>::const_iterator j = i->second.begin(); j != i->second.end();
+	   ++j) {
+	good_peers.emplace_back(maps[*j]->objects[i->first], *j);
       }
-
-      m_authoritative.emplace(hobj, good_peers);
+      m_authoritative.emplace(i->first, good_peers);
     }
 
-    for (const auto& [hobj, shrd_list] : authoritative) {
+    //     for (auto& [hobj, shrd_list] : authoritative) {
+    //       list<pair<ScrubMap::object, pg_shard_t>> good_peers;
+    //       for (const auto& shrd : shrd_list) {
+    // 	good_peers.emplace_back(maps[shrd]->objects[hobj], shrd);
+    //       }
 
-      // RRR a comment?
+    //       m_authoritative.emplace(hobj, good_peers);
+    //     }
 
-      m_cleaned_meta_map.objects.erase(hobj);
-      m_cleaned_meta_map.objects.insert(*(maps[shrd_list.back()]->objects.find(hobj)));
+
+    for (auto i = authoritative.begin(); i != authoritative.end(); ++i) {
+      m_cleaned_meta_map.objects.erase(i->first);
+      m_cleaned_meta_map.objects.insert(
+	*(maps[i->second.back()]->objects.find(i->first)));
     }
   }
 
@@ -1312,10 +1321,10 @@ void PgScrubber::send_replica_map(bool was_preempted)
  *  - if the replica lets us know it was interrupted, we mark the chunk as interrupted.
  *    The state-machine will react to that when all replica maps are received.
  *  - when all maps are received, we signal the FSM with the GotReplicas event (see
- *    scrub_send_replmaps_ready()). Note that due to the no-reentrancy limitations of the
- *    FSM, we do not 'process' the event directly. Instead - it is queued for the OSD to
- *    handle (well - the incoming message is marked for fast dispatching, which is an even
- *    better reason for handling it via the queue).
+ *    scrub_send_replmaps_ready()). Note that due to the no-reentrancy limitations of
+ * the FSM, we do not 'process' the event directly. Instead - it is queued for the OSD
+ * to handle (well - the incoming message is marked for fast dispatching, which is an
+ * even better reason for handling it via the queue).
  */
 void PgScrubber::map_from_replica(OpRequestRef op)
 {
@@ -1496,7 +1505,7 @@ void PgScrubber::unreserve_replicas()
 
 	if (m_inconsistent.count(hobj)) {
 	  m_pg->repair_object(hobj, shrd_list, m_inconsistent[hobj]);
-	  m_fixed_count += missing_entry->second.size();
+	  m_fixed_count += m_inconsistent[hobj].size();
 	}
       }
     }
