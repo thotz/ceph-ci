@@ -121,6 +121,7 @@ void ElectionLogic::start()
   }
   ldout(cct, 5) << "start -- can i be leader?" << dendl;
 
+  ldout(cct, 5) << "strategy " << strategy << dendl;
   acked_me.clear();
   init();
   

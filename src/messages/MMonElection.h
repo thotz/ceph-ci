@@ -78,7 +78,7 @@ public:
   std::string_view get_type_name() const override { return "election"; }
   void print(std::ostream& out) const override {
     out << "election(" << fsid << " " << get_opname(op)
-	<< " rel " << (int)mon_release << " e" << epoch << ")";
+	<< " rel " << (int)mon_release << " strategy " << strategy << " e" << epoch << ")";
   }
 
   void encode_payload(uint64_t features) override {
