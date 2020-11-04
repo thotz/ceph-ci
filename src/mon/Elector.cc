@@ -642,9 +642,9 @@ void Elector::dispatch(MonOpRequestRef op)
 		<< dendl;
       }
 
-      if (em->strategy != logic.strategy) {
+      if (static_cast<ElectionLogic::election_strategy>(em->strategy) != logic.strategy) {
 	dout(5) << __func__ << " somehow got an Election message with different strategy "
-		<< em->strategy << " from local " << logic.strategy
+		<< static_cast<ElectionLogic::election_strategy>(em->strategy) << " from local " << logic.strategy
 		<< "; dropping for now to let race resolve" << dendl;
 	return;
       }
