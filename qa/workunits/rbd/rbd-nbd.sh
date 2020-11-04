@@ -10,6 +10,8 @@ SIZE=64
 DATA=
 DEV=
 
+export CEPH_ARGS='--debug-rbd=30 --no-log-to-stderr'
+
 _sudo()
 {
     local cmd
