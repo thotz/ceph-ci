@@ -1,0 +1,6 @@
+tasks:
+  - exec:
+      client.0:
+        - echo '{"type":"raw","stream":{"type":"http","url":"http://localhost:9753/base.client.0.raw"}}' | rbd migration prepare --import-only --source-spec-path - client.0.0
+        - rbd migration prepare --import-only --source-spec '{"type":"raw","stream":{"type":"http","url":"http://localhost:9753/empty.raw"}}' client.0.1
+        - rbd migration prepare --import-only --source-spec '{"type":"raw","stream":{"type":"http","url":"http://localhost:9753/empty.raw"}}' client.0.2
