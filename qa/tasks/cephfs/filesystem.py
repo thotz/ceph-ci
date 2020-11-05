@@ -641,6 +641,10 @@ class Filesystem(MDSCluster):
             if max_mds > 1:
                 self.set_max_mds(max_mds)
 
+            set_allow_multifs = self.fs_config.get('set_allow_multifs', False)
+            if set_allow_multifs:
+                self.set_allow_multifs()
+
             # If absent will use the default value (60 seconds)
             session_timeout = self.fs_config.get('session_timeout', 60)
             if session_timeout != 60:

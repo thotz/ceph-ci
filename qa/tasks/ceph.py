@@ -426,12 +426,20 @@ def cephfs_setup(ctx, config):
     # If there are any MDSs, then create a filesystem for them to use
     # Do this last because requires mon cluster to be up and running
     if mdss.remotes:
-        log.info('Setting up CephFS filesystem...')
+        log.info('Setting up CephFS filesystem(s)...')
+        cephfs_configs = config.get('cephfs', {'cephfs': {}})
+        set_allow_multifs = True if len(cephfs_configs) > 1 else False
 
-        Filesystem(ctx, fs_config=config.get('cephfs', None), name='cephfs',
-                   create=True, ec_profile=config.get('cephfs_ec_profile', None))
+        for name, cephfs_config in cephfs_configs.items():
+            if cephfs_config is None:
+                cephfs_config = {}
+            if set_allow_multifs:
+                cephfs_config['set_allow_multifs'] = True
+                set_allow_multifs = False
+            Filesystem(ctx, fs_config=cephfs_config, name=name,
+                       create=True, ec_profile=config.get('cephfs_ec_profile', None))
 
-    yield
+        yield
 
 @contextlib.contextmanager
 def watchdog_setup(ctx, config):
