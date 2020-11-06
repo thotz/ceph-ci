@@ -1,4 +1,5 @@
 overrides:
   ceph:
     cephfs:
-      max_mds: 1
+      cephfs:
+        max_mds: 1
