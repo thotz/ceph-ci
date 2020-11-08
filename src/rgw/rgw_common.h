@@ -39,6 +39,7 @@
 #include "cls/rgw/cls_rgw_types.h"
 #include "include/rados/librados.hpp"
 #include "rgw_public_access.h"
+#include "include/neorados/RADOS.hpp"
 
 namespace ceph {
   class Formatter;
@@ -950,6 +951,8 @@ struct RGWObjVersionTracker {
   void prepare_op_for_write(librados::ObjectWriteOperation *op);
 
   void apply_write();
+  void prepare_op_for_read(neorados::ReadOp& op);
+  void prepare_op_for_write(neorados::WriteOp& op);
 
   void clear() {
     read_version = obj_version();
@@ -1853,9 +1856,9 @@ inline ostream& operator<<(ostream& out, const rgw_obj &o) {
   return out << o.bucket.name << ":" << o.get_oid();
 }
 
-static inline void buf_to_hex(const unsigned char* const buf,
-                              const size_t len,
-                              char* const str)
+inline void buf_to_hex(const unsigned char* const buf,
+		       const size_t len,
+		       char* const str)
 {
   str[0] = '\0';
   for (size_t i = 0; i < len; i++) {
@@ -1883,7 +1886,7 @@ static inline int hexdigit(char c)
   return -EINVAL;
 }
 
-static inline int hex_to_buf(const char *hex, char *buf, int len)
+inline int hex_to_buf(const char *hex, char *buf, int len)
 {
   int i = 0;
   const char *p = hex;
@@ -1908,7 +1911,7 @@ static inline int hex_to_buf(const char *hex, char *buf, int len)
   return i;
 }
 
-static inline int rgw_str_to_bool(const char *s, int def_val)
+inline int rgw_str_to_bool(const char *s, int def_val)
 {
   if (!s)
     return def_val;
@@ -1919,7 +1922,7 @@ static inline int rgw_str_to_bool(const char *s, int def_val)
           strcasecmp(s, "1") == 0);
 }
 
-static inline void append_rand_alpha(CephContext *cct, const string& src, string& dest, int len)
+inline void append_rand_alpha(CephContext *cct, const string& src, string& dest, int len)
 {
   dest = src;
   char buf[len + 1];
@@ -1928,7 +1931,7 @@ static inline void append_rand_alpha(CephContext *cct, const string& src, string
   dest.append(buf);
 }
 
-static inline const char *rgw_obj_category_name(RGWObjCategory category)
+inline const char *rgw_obj_category_name(RGWObjCategory category)
 {
   switch (category) {
   case RGWObjCategory::None:
@@ -1944,17 +1947,17 @@ static inline const char *rgw_obj_category_name(RGWObjCategory category)
   return "unknown";
 }
 
-static inline uint64_t rgw_rounded_kb(uint64_t bytes)
+inline uint64_t rgw_rounded_kb(uint64_t bytes)
 {
   return (bytes + 1023) / 1024;
 }
 
-static inline uint64_t rgw_rounded_objsize(uint64_t bytes)
+inline uint64_t rgw_rounded_objsize(uint64_t bytes)
 {
   return ((bytes + 4095) & ~4095);
 }
 
-static inline uint64_t rgw_rounded_objsize_kb(uint64_t bytes)
+inline uint64_t rgw_rounded_objsize_kb(uint64_t bytes)
 {
   return ((bytes + 4095) & ~4095) / 1024;
 }
@@ -2152,7 +2155,7 @@ extern std::string url_remove_prefix(const std::string& url); // Removes hhtp, h
 extern void calc_hmac_sha1(const char *key, int key_len,
                           const char *msg, int msg_len, char *dest);
 
-static inline sha1_digest_t
+inline sha1_digest_t
 calc_hmac_sha1(const std::string_view& key, const std::string_view& msg) {
   sha1_digest_t dest;
   calc_hmac_sha1(key.data(), key.size(), msg.data(), msg.size(),
@@ -2165,7 +2168,7 @@ extern void calc_hmac_sha256(const char *key, int key_len,
                              const char *msg, int msg_len,
                              char *dest);
 
-static inline sha256_digest_t
+inline sha256_digest_t
 calc_hmac_sha256(const char *key, const int key_len,
                  const char *msg, const int msg_len) {
   sha256_digest_t dest;
@@ -2174,7 +2177,7 @@ calc_hmac_sha256(const char *key, const int key_len,
   return dest;
 }
 
-static inline sha256_digest_t
+inline sha256_digest_t
 calc_hmac_sha256(const std::string_view& key, const std::string_view& msg) {
   sha256_digest_t dest;
   calc_hmac_sha256(key.data(), key.size(),
@@ -2183,7 +2186,7 @@ calc_hmac_sha256(const std::string_view& key, const std::string_view& msg) {
   return dest;
 }
 
-static inline sha256_digest_t
+inline sha256_digest_t
 calc_hmac_sha256(const sha256_digest_t &key,
                  const std::string_view& msg) {
   sha256_digest_t dest;
@@ -2193,7 +2196,7 @@ calc_hmac_sha256(const sha256_digest_t &key,
   return dest;
 }
 
-static inline sha256_digest_t
+inline sha256_digest_t
 calc_hmac_sha256(const std::vector<unsigned char>& key,
                  const std::string_view& msg) {
   sha256_digest_t dest;
@@ -2204,7 +2207,7 @@ calc_hmac_sha256(const std::vector<unsigned char>& key,
 }
 
 template<size_t KeyLenN>
-static inline sha256_digest_t
+inline sha256_digest_t
 calc_hmac_sha256(const std::array<unsigned char, KeyLenN>& key,
                  const std::string_view& msg) {
   sha256_digest_t dest;
@@ -2239,8 +2242,8 @@ extern string lowercase_dash_http_attr(const string& orig);
 void rgw_setup_saved_curl_handles();
 void rgw_release_all_curl_handles();
 
-static inline void rgw_escape_str(const string& s, char esc_char,
-				  char special_char, string *dest)
+inline void rgw_escape_str(const string& s, char esc_char,
+			   char special_char, string *dest)
 {
   const char *src = s.c_str();
   char dest_buf[s.size() * 2 + 1];
@@ -2257,9 +2260,9 @@ static inline void rgw_escape_str(const string& s, char esc_char,
   *dest = dest_buf;
 }
 
-static inline ssize_t rgw_unescape_str(const string& s, ssize_t ofs,
-				       char esc_char, char special_char,
-				       string *dest)
+inline ssize_t rgw_unescape_str(const string& s, ssize_t ofs,
+				char esc_char, char special_char,
+				string *dest)
 {
   const char *src = s.c_str();
   char dest_buf[s.size() + 1];
@@ -2287,7 +2290,7 @@ static inline ssize_t rgw_unescape_str(const string& s, ssize_t ofs,
   return string::npos;
 }
 
-static inline string rgw_bl_str(ceph::buffer::list& raw)
+inline string rgw_bl_str(ceph::buffer::list& raw)
 {
   size_t len = raw.length();
   string s(raw.c_str(), len);

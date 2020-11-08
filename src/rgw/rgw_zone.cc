@@ -1252,7 +1252,7 @@ int RGWPeriod::update()
   auto zone_svc = sysobj_svc->get_zone_svc();
   ldout(cct, 20) << __func__ << " realm " << realm_id << " period " << get_id() << dendl;
   list<string> zonegroups;
-  int ret = zone_svc->list_zonegroups(zonegroups);
+  int ret = zone_svc->list_zonegroups(zonegroups, null_yield);
   if (ret < 0) {
     ldout(cct, 0) << "ERROR: failed to list zonegroups: " << cpp_strerror(-ret) << dendl;
     return ret;
@@ -1597,7 +1597,7 @@ int RGWZoneParams::fix_pool_names()
 {
 
   list<string> zones;
-  int r = zone_svc->list_zones(zones);
+  int r = zone_svc->list_zones(zones, null_yield);
   if (r < 0) {
     ldout(cct, 10) << "WARNING: store->list_zones() returned r=" << r << dendl;
   }
