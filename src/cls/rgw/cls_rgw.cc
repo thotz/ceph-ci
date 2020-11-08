@@ -4169,7 +4169,8 @@ static int rgw_head_prefetch(cls_method_context_t hctx,
   bufferlist data;
   length = std::min(length, op.max_length);
   if (length) {
-    ret = cls_cxx_read2(hctx, offset, length, &data, 0);
+    ret = cls_cxx_read2(hctx, offset, length, &data, (CEPH_OSD_OP_FLAG_FADVISE_WILLNEED | CEPH_OSD_FLAG_READ));
+    CLS_LOG(1, "ERROR: %s(): failed to read head object", __func__);
     if (ret < 0) {
       return ret;
     }
