@@ -839,7 +839,7 @@ int RGWLC::handle_multipart_expiration(
    * operating on one shard at a time */
   list_op.params.allow_unordered = true;
   list_op.params.ns = RGW_OBJ_NS_MULTIPART;
-  list_op.params.filter = &mp_filter;
+  list_op.params.filter = mp_filter;
 
   auto pf = [&](RGWLC::LCWorker* wk, WorkQ* wq, WorkItem& wi) {
     auto wt = boost::get<std::tuple<lc_op, rgw_bucket_dir_entry>>(wi);
