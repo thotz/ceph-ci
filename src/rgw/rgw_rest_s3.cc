@@ -4574,12 +4574,14 @@ int RGWHandler_REST_S3::init_from_header(rgw::sal::RGWRadosStore *store,
     return 0;
 
   req = req_name;
+  ldpp_dout(s, 20) << "DFG req=" << req << dendl;
   int pos = req.find('/');
   if (pos >= 0) {
     first = req.substr(0, pos);
   } else {
     first = req;
   }
+  ldpp_dout(s, 20) << "DFG first=" << req << " pos=" << pos << dendl;
 
   /*
    * XXX The intent of the check for empty is apparently to let the bucket
@@ -4596,8 +4598,9 @@ int RGWHandler_REST_S3::init_from_header(rgw::sal::RGWRadosStore *store,
     s->init_state.url_bucket = first;
     string encoded_obj_str;
     if (pos >= 0) {
-      string encoded_obj_str = req.substr(pos+1);
+      encoded_obj_str = req.substr(pos+1);
     }
+  ldpp_dout(s, 20) << "DFG encoded_obj_str=" << encoded_obj_str << dendl;
 
     if (!encoded_obj_str.empty()) {
       if (s->bucket) {
@@ -4613,6 +4616,7 @@ int RGWHandler_REST_S3::init_from_header(rgw::sal::RGWRadosStore *store,
       s->object = store->get_object(rgw_obj_key(req_name, s->info.args.get("versionId")));
     }
   }
+  ldpp_dout(s, 20) << "DFG s->object=" << s->object << dendl;
   return 0;
 }
 
