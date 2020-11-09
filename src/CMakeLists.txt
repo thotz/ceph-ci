@@ -28,7 +28,8 @@ add_definitions(
   -D_REENTRANT
   -D_THREAD_SAFE
   -D__STDC_FORMAT_MACROS
-  -D_FILE_OFFSET_BITS=64)
+  -D_FILE_OFFSET_BITS=64
+  -DBOOST_ASIO_DISABLE_THREAD_KEYWORD_EXTENSION)
 if(LINUX)
   add_definitions("-D_GNU_SOURCE")
 endif()
@@ -403,6 +404,7 @@ set(ceph_common_objs
   $<TARGET_OBJECTS:compressor_objs>
   $<TARGET_OBJECTS:common-objs>
   $<TARGET_OBJECTS:common_mountcephfs_objs>
+  $<TARGET_OBJECTS:common_asio_static_variables_obj>
   $<TARGET_OBJECTS:crush_objs>)
 set(ceph_common_deps
   json_spirit erasure_code arch crc32

@@ -7,6 +7,9 @@ add_library(common_texttable_obj OBJECT
 add_library(common_prioritycache_obj OBJECT
   PriorityCache.cc)
 
+add_library(common_asio_static_variables_obj OBJECT
+  async/asio_static_variables.cc)
+
 if(WIN32)
   add_library(dlfcn_win32 STATIC dlfcn_win32.cc)
 endif()

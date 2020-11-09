@@ -330,7 +330,9 @@ add_ceph_unittest(unittest_hobject)
 
 add_executable(unittest_async_completion test_async_completion.cc)
 add_ceph_unittest(unittest_async_completion)
-target_link_libraries(unittest_async_completion Boost::system)
+target_link_libraries(unittest_async_completion
+  $<TARGET_OBJECTS:common_asio_static_variables_obj>
+  Boost::system)
 
 add_executable(unittest_async_shared_mutex test_async_shared_mutex.cc)
 add_ceph_unittest(unittest_async_shared_mutex)
@@ -347,7 +349,10 @@ add_ceph_unittest(unittest_ceph_timer)
 
 add_executable(unittest_blocked_completion test_blocked_completion.cc)
 add_ceph_unittest(unittest_blocked_completion)
-target_link_libraries(unittest_blocked_completion Boost::system GTest::GTest)
+target_link_libraries(unittest_blocked_completion
+  $<TARGET_OBJECTS:common_asio_static_variables_obj>
+  Boost::system
+  GTest::GTest)
 
 add_executable(unittest_allocate_unique test_allocate_unique.cc)
 add_ceph_unittest(unittest_allocate_unique)

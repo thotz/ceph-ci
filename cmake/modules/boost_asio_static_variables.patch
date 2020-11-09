@@ -1,0 +1,18 @@
+--- a/boost/asio/detail/call_stack.hpp	2020-11-09 15:36:10.800244119 -0500
++++ b/boost/asio/detail/call_stack.hpp	2020-11-09 15:37:36.199826023 -0500
+@@ -114,9 +114,12 @@
+   static tss_ptr<context> top_;
+ };
+ 
+-template <typename Key, typename Value>
+-tss_ptr<typename call_stack<Key, Value>::context>
+-call_stack<Key, Value>::top_;
++// moving static variables to ceph-common to avoid crash due to multiple
++// definitions. see https://github.com/boostorg/asio/issues/150
++// template <typename Key, typename Value>
++//
++// tss_ptr<typename call_stack<Key, Value>::context>
++// call_stack<Key, Value>::top_;
+ 
+ } // namespace detail
+ } // namespace asio
