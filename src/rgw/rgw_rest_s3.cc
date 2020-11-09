@@ -4940,7 +4940,7 @@ int RGWHandler_REST_S3Website::retarget(RGWOp* op, RGWOp** new_op) {
     return -EINVAL;
   }
 
-  ldpp_dout(s, 10) << "retarget get_effective_key " << s->object->get_key() << " -> "
+  ldpp_dout(s, 10) << "retarget get_effective_key " << s->object << " -> "
 		    << new_obj << dendl;
 
   RGWBWRoutingRule rrule;
@@ -4952,7 +4952,7 @@ int RGWHandler_REST_S3Website::retarget(RGWOp* op, RGWOp** new_op) {
     const string& protocol =
       (s->info.env->get("SERVER_PORT_SECURE") ? "https" : "http");
     int redirect_code = 0;
-    rrule.apply_rule(protocol, hostname, s->object->get_name(), &s->redirect,
+    rrule.apply_rule(protocol, hostname, key_name, &s->redirect,
 		    &redirect_code);
     // APply a custom HTTP response code
     if (redirect_code > 0)
@@ -4969,6 +4969,7 @@ int RGWHandler_REST_S3Website::retarget(RGWOp* op, RGWOp** new_op) {
    */
 
   s->object = store->get_object(new_obj);
+  s->object->set_bucket(s->bucket.get());
 
   return 0;
 }
